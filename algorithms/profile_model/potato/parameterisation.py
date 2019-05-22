@@ -502,7 +502,7 @@ class ModelState(object):
         mosaicity_parameterisation,
         wavelength_parameterisation=None,
         fix_mosaic_spread=False,
-        fix_wavelength_spread=False,
+        fix_wavelength_spread=True,
         fix_unit_cell=False,
         fix_orientation=False,
     ):
