@@ -1,10 +1,13 @@
 from __future__ import division
 from __future__ import print_function
+from collections import namedtuple
+import pytest
 from scitbx import matrix
 from math import log, pi
+from os.path import join
 from random import uniform, randint
-from dials_scratch.jmp.potato.model import compute_change_of_basis_operation
-from dials_scratch.jmp.potato.parameterisation import SimpleMosaicityParameterisation
+from dials.algorithms.profile_model.potato.model import compute_change_of_basis_operation
+from dials.algorithms.profile_model.potato.parameterisation import Simple6MosaicityParameterisation
 from dxtbx.model.experiment_list import ExperimentListFactory
 from dials.algorithms.refinement.parameterisation.crystal_parameters import (
     CrystalUnitCellParameterisation,
@@ -12,10 +15,11 @@ from dials.algorithms.refinement.parameterisation.crystal_parameters import (
 from dials.algorithms.refinement.parameterisation.crystal_parameters import (
     CrystalOrientationParameterisation,
 )
-from dials_scratch.jmp.potato.profile_refiner import ReflectionData
+from dials.algorithms.profile_model.potato.profile_refiner import ReflectionData
 from dials.array_family import flex
-from dials_scratch.jmp.potato.parameterisation import ModelState
-from dials_scratch.jmp.potato.parameterisation import ReflectionModelState
+from dials.algorithms.profile_model.potato.parameterisation import ModelState
+from dials.algorithms.profile_model.potato.parameterisation import ReflectionModelState
+from dials.algorithms.profile_model.potato.refiner import ReflectionLikelihood
 
 
 def first_derivative(func, x, h):
@@ -77,7 +81,7 @@ def generate_data(experiments, reflections):
 
     params = (b1, b2, b3, b4, b5, b6)
 
-    S_param = SimpleMosaicityParameterisation(params)
+    S_param = Simple6MosaicityParameterisation(params)
     L_param = (uniform(1e-3, 2e-3),)
     W_param = (uniform(1e-3, 2e-3), uniform(0, 1e-3), uniform(1e-3, 2e-3))
     ctot = randint(100, 1000)
@@ -90,9 +94,31 @@ def generate_data(experiments, reflections):
     return params, s0, h, ctot, mobs, Sobs
 
 
-def test_first_derivatives(experiment, models, s0, h, ctot, mobs, Sobs):
 
-    from dials_scratch.jmp.potato.refiner import ReflectionLikelihood
+@pytest.fixture
+def testdata(dials_regression):
+
+    TestData = namedtuple("TestData", ["experiment", "models", "s0", "h", "ctot", "mobs", "Sobs"])
+
+    experiments = ExperimentListFactory.from_json_file(join(dials_regression, "potato_test_data", "experiments.json"))
+    experiments[0].scan.set_oscillation((0, 0.01), deg=True)
+    reflections = flex.reflection_table.from_predictions_multi(experiments)
+    
+
+    models, s0, h, ctot, mobs, Sobs = generate_data(experiments, reflections)
+    
+    return TestData(experiment=experiments[0], models=models, s0=s0, h=h, ctot=ctot, mobs=mobs, Sobs=Sobs)
+
+
+def test_first_derivatives(testdata):
+
+    experiment = testdata.experiment
+    models = testdata.models
+    s0 = testdata.s0
+    h = testdata.h
+    ctot = testdata.ctot
+    mobs = testdata.mobs
+    Sobs = testdata.Sobs
 
     U_params = models[1].get_param_vals()
     B_params = models[2].get_param_vals()
@@ -100,18 +126,17 @@ def test_first_derivatives(experiment, models, s0, h, ctot, mobs, Sobs):
     L_params = flex.double(models[3])
     W_params = flex.double(models[4])
 
-    state = ModelState(experiment.crystal)
+    parameterisation = Simple6MosaicityParameterisation()
+    state = ModelState(experiment, parameterisation)
     state.set_U_params(U_params)
     state.set_B_params(B_params)
     state.set_M_params(M_params)
-    state.set_L_params(L_params)
-    state.set_W_params(W_params)
+    # state.set_L_params(L_params)
+    # state.set_W_params(W_params)
 
     def compute_L(parameters):
         state.set_active_parameters(parameters)
-        model = ReflectionModelState(state, s0, h)
-
-        rd = ReflectionLikelihood(model, s0, mobs, h, ctot, matrix.col((0, 0)), Sobs)
+        rd = ReflectionLikelihood(state, s0, mobs, h, ctot, matrix.col((0, 0)), Sobs)
         return rd.log_likelihood()
 
     step = 1e-5
@@ -129,18 +154,23 @@ def test_first_derivatives(experiment, models, s0, h, ctot, mobs, Sobs):
         dL_num.append(first_derivative(f, parameters[i], step))
 
     state.set_active_parameters(parameters)
-    model = ReflectionModelState(state, s0, h)
-
-    rd = ReflectionLikelihood(model, s0, mobs, h, ctot, matrix.col((0, 0)), Sobs)
+    rd = ReflectionLikelihood(state, s0, mobs, h, ctot, matrix.col((0, 0)), Sobs)
 
     dL_cal = list(rd.first_derivatives())
 
     assert all(abs(n - c) < 1e-3 for n, c in zip(dL_num, dL_cal))
 
-    print("OK")
 
 
-def test_reflection_model(experiment, models, s0, h):
+def test_reflection_model(testdata):
+    
+    experiment = testdata.experiment
+    models = testdata.models
+    s0 = testdata.s0
+    h = testdata.h
+    ctot = testdata.ctot
+    mobs = testdata.mobs
+    Sobs = testdata.Sobs
 
     U_params = models[1].get_param_vals()
     B_params = models[2].get_param_vals()
@@ -148,12 +178,13 @@ def test_reflection_model(experiment, models, s0, h):
     L_params = flex.double(models[3])
     W_params = flex.double(models[4])
 
-    state = ModelState(experiment.crystal)
+    parameterisation = Simple6MosaicityParameterisation()
+    state = ModelState(experiment, parameterisation)
     state.set_U_params(U_params)
     state.set_B_params(B_params)
     state.set_M_params(M_params)
-    state.set_L_params(L_params)
-    state.set_W_params(W_params)
+    # state.set_L_params(L_params)
+    # state.set_W_params(W_params)
 
     model = ReflectionModelState(state, s0, h)
 
@@ -202,26 +233,3 @@ def test_reflection_model(experiment, models, s0, h):
     for n, c in zip(ds_num, dS_dp):
         assert all(abs(nn - cc) < 1e-7 for nn, cc in zip(n, c))
 
-    print("OK")
-
-
-def read_experiments():
-    experiments = ExperimentListFactory.from_json_file("experiments.json")
-    return experiments
-
-
-def test():
-
-    experiments = read_experiments()
-    experiments[0].scan.set_oscillation((0, 0.01), deg=True)
-    reflections = flex.reflection_table.from_predictions_multi(experiments)
-
-    for i in range(1):
-
-        models, s0, h, ctot, mobs, Sobs = generate_data(experiments, reflections)
-        test_reflection_model(experiments[0], models, s0, h)
-        test_first_derivatives(experiments[0], models, s0, h, ctot, mobs, Sobs)
-
-
-if __name__ == "__main__":
-    test()

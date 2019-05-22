@@ -1,16 +1,16 @@
 from __future__ import division
 from __future__ import print_function
 from scitbx import matrix
+from dials.algorithms.profile_model.potato.model import Simple6MosaicityModel
+from dials.algorithms.profile_model.potato.model import Simple6MosaicityParameterisation
 
 
 def tst_simple_mosaicity_model():
 
-    from dials_scratch.jmp.potato.model import SimpleMosaicityModel
-    from dials_scratch.jmp.potato.model import SimpleMosaicityParameterisation
 
     sigma = matrix.sqr((1, 0, 0, 0, 2, 0, 0, 0, 3))
 
-    model = SimpleMosaicityModel(sigma)
+    model = Simple6MosaicityParameterisation(sigma)
 
     parameterisation = model.parameterisation()
 
@@ -26,8 +26,3 @@ def tst_simple_mosaicity_model():
 
     assert all(abs(a - b) < 1e-7 for a, b in zip(sigma, sigma2))
 
-    print("OK")
-
-
-if __name__ == "__main__":
-    tst_simple_mosaicity_model()

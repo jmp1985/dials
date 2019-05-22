@@ -19,13 +19,13 @@ from dials.algorithms.profile_model.gaussian_rs import BBoxCalculator
 from dials.algorithms.profile_model.gaussian_rs import CoordinateSystem2d
 from dials.algorithms.refinement.refinement_helpers import corrgram
 from dials.algorithms.statistics.fast_mcd import FastMCD, maha_dist_sq
-from dials_scratch.jmp.potato.refiner import RefinerData
-from dials_scratch.jmp.potato.refiner import Refiner as ProfileRefiner
-from dials_scratch.jmp.potato.refiner import print_eigen_values_and_vectors
-from dials_scratch.jmp.potato.parameterisation import ModelState
-from dials_scratch.jmp.potato.model import ProfileModelFactory
-from dials_scratch.jmp.potato import chisq_pdf
-from dials_scratch.jmp.potato import chisq_quantile
+from dials.algorithms.profile_model.potato.refiner import RefinerData
+from dials.algorithms.profile_model.potato.refiner import Refiner as ProfileRefiner
+from dials.algorithms.profile_model.potato.refiner import print_eigen_values_and_vectors
+from dials.algorithms.profile_model.potato.parameterisation import ModelState
+from dials.algorithms.profile_model.potato.model import ProfileModelFactory
+from dials.algorithms.profile_model.potato import chisq_pdf
+from dials.algorithms.profile_model.potato import chisq_quantile
 from dials.algorithms.spot_prediction import IndexGenerator
 from scitbx.linalg import eigensystem, l_l_transpose_cholesky_decomposition_in_place
 from dials.array_family import flex

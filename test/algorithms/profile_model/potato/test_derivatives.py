@@ -1,11 +1,11 @@
 from __future__ import division
 from __future__ import print_function
+import pytest
 from scitbx import matrix
 from math import log, pi
 from random import uniform, randint
-from dials_scratch.jmp.potato.parameterisation import SimpleMosaicityParameterisation
-from dials_scratch.jmp.potato.profile_refiner import ReflectionData
-
+from dials.algorithms.profile_model.potato.parameterisation import Simple6MosaicityParameterisation
+from dials.algorithms.profile_model.potato.profile_refiner import ReflectionData
 
 def first_derivative(func, x, h):
     return (-func(x + 2 * h) + 8 * func(x + h) - 8 * func(x - h) + func(x - 2 * h)) / (
@@ -63,7 +63,22 @@ def generate_data():
 
     return (b1, b2, b3, b4, b5, b6), s0, s2, ctot, X, S
 
+def generate_testdata():
 
+    for i in range(10):
+
+        (b1, b2, b3, b4, b5, b6), s0, s2, ctot, mobs, Sobs = generate_data()
+
+        parameterisation = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+        reflection_model = ReflectionData(
+            parameterisation, s0, s2, ctot, mobs, Sobs, second_derivatives=True
+        )
+
+        yield reflection_model
+
+
+
+@pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_dSdb_22(reflection_model):
 
     (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
@@ -74,7 +89,7 @@ def test_dSdb_22(reflection_model):
     ctot = reflection_model.ctot
 
     def compute_sigma22(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+        model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
         sigma = model.sigma()
         sigmap = R * sigma * R.transpose()
         sigma22 = sigmap[8]
@@ -124,6 +139,7 @@ def test_dSdb_22(reflection_model):
     # print 'OK'
 
 
+@pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_dm_bar_db(reflection_model):
 
     (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
@@ -136,7 +152,7 @@ def test_dm_bar_db(reflection_model):
     epsilon = s0.length() - mu2
 
     def compute_mu_bar(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+        model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
         sigma = model.sigma()
         sigmap = R * sigma * R.transpose()
         sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
@@ -187,6 +203,7 @@ def test_dm_bar_db(reflection_model):
     assert all(abs(a - b) < 1e-7 for a, b in zip(dmubar_db6_num, dmubar_db6_cal))
 
 
+@pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_dS_bar_db(reflection_model):
 
     (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
@@ -197,7 +214,7 @@ def test_dS_bar_db(reflection_model):
     ctot = reflection_model.ctot
 
     def compute_sigma_bar(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+        model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
         sigma = model.sigma()
         sigmap = R * sigma * R.transpose()
         sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
@@ -250,6 +267,7 @@ def test_dS_bar_db(reflection_model):
     # print 'OK'
 
 
+@pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_dLdb(reflection_model):
 
     (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
@@ -262,7 +280,7 @@ def test_dLdb(reflection_model):
     ctot = reflection_model.ctot
 
     def compute_L(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+        model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
         sigma = model.sigma()
         sigmap = R * sigma * R.transpose()
         sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
@@ -329,245 +347,223 @@ def test_dLdb(reflection_model):
     # print 'OK'
 
 
-def test_d2S_dbij(i, j, reflection_model):
+@pytest.mark.parametrize("reflection_model", generate_testdata())
+def test_d2S_dbij(reflection_model):
 
-    (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
-    R = reflection_model.R
-    mu2 = reflection_model.s2.length()
-    r = reflection_model.s0.length()
-    Sobs = reflection_model.sobs
-    ctot = reflection_model.ctot
+    def test_for_index(i, j):
+        (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
+        R = reflection_model.R
+        mu2 = reflection_model.s2.length()
+        r = reflection_model.s0.length()
+        Sobs = reflection_model.sobs
+        ctot = reflection_model.ctot
 
-    def compute_S(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
-        sigma = model.sigma()
-        sigmap = R * sigma * R.transpose()
-        sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
-        sigma12 = matrix.col((sigmap[2], sigmap[5]))
-        sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
-        sigma22 = sigmap[8]
-        return sigma22
+        def compute_S(b1, b2, b3, b4, b5, b6):
+            model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+            sigma = model.sigma()
+            sigmap = R * sigma * R.transpose()
+            sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
+            sigma12 = matrix.col((sigmap[2], sigmap[5]))
+            sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
+            sigma22 = sigmap[8]
+            return sigma22
 
-    def f1(x):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        return compute_S(*params)
+        def f1(x):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            return compute_S(*params)
 
-    def f2(x, y):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        params[j] = y
-        return compute_S(*params)
+        def f2(x, y):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            params[j] = y
+            return compute_S(*params)
 
-    h = 0.001
+        h = 0.001
 
-    x = (b1, b2, b3, b4, b5, b6)[i]
-    y = (b1, b2, b3, b4, b5, b6)[j]
+        x = (b1, b2, b3, b4, b5, b6)[i]
+        y = (b1, b2, b3, b4, b5, b6)[j]
 
-    if i == j:
-        d2Sdb_22_num = second_derivative(f1, x=x, h=h)
-    else:
-        d2Sdb_22_num = second_derivative(f2, x=x, y=y, h=h)
+        if i == j:
+            d2Sdb_22_num = second_derivative(f1, x=x, h=h)
+        else:
+            d2Sdb_22_num = second_derivative(f2, x=x, y=y, h=h)
 
-    d2Sdb_22_cal = reflection_model.marginal.second_derivatives()[i, j]
+        d2Sdb_22_cal = reflection_model.marginal.second_derivatives()[i, j]
 
-    assert abs(d2Sdb_22_num - d2Sdb_22_cal) < 1e-7
+        assert abs(d2Sdb_22_num - d2Sdb_22_cal) < 1e-7
 
-    # print 'OK'
-
-
-def test_d2S_bar_dbij(i, j, reflection_model):
-
-    (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
-    R = reflection_model.R
-    mu2 = reflection_model.s2.length()
-    r = reflection_model.s0.length()
-    Sobs = reflection_model.sobs
-    ctot = reflection_model.ctot
-
-    def compute_Sbar(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
-        sigma = model.sigma()
-        sigmap = R * sigma * R.transpose()
-        sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
-        sigma12 = matrix.col((sigmap[2], sigmap[5]))
-        sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
-        sigma22 = sigmap[8]
-        return sigma11 - sigma12 * (1 / sigma22) * sigma21
-
-    def f1(x):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        return compute_Sbar(*params)
-
-    def f2(x, y):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        params[j] = y
-        return compute_Sbar(*params)
-
-    h = 0.001
-
-    x = (b1, b2, b3, b4, b5, b6)[i]
-    y = (b1, b2, b3, b4, b5, b6)[j]
-
-    if i == j:
-        d2S_bar_db_num = second_derivative(f1, x=x, h=h)
-    else:
-        d2S_bar_db_num = second_derivative(f2, x=x, y=y, h=h)
-
-    d2S_bar_db_cal = reflection_model.conditional.second_derivatives_of_sigma()[i][j]
-
-    assert all(abs(a - b) < 1e-5 for a, b in zip(d2S_bar_db_num, d2S_bar_db_cal))
-
-    # print 'OK'
-
-
-def test_d2m_bar_dbij(i, j, reflection_model):
-
-    (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
-
-    R = reflection_model.R
-    s0 = reflection_model.s0
-    mu2 = reflection_model.s2.length()
-    r = reflection_model.s0.length()
-    Sobs = reflection_model.sobs
-    ctot = reflection_model.ctot
-    epsilon = s0.length() - mu2
-
-    def compute_mu_bar(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
-        sigma = model.sigma()
-        sigmap = R * sigma * R.transpose()
-        sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
-        sigma12 = matrix.col((sigmap[2], sigmap[5]))
-        sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
-        sigma22 = sigmap[8]
-        return sigma12 * (1 / sigma22) * epsilon
-
-    def f1(x):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        return compute_mu_bar(*params)
-
-    def f2(x, y):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        params[j] = y
-        return compute_mu_bar(*params)
-
-    h = 0.001
-
-    x = (b1, b2, b3, b4, b5, b6)[i]
-    y = (b1, b2, b3, b4, b5, b6)[j]
-
-    if i == j:
-        d2m_bar_db_num = second_derivative(f1, x=x, h=h)
-    else:
-        d2m_bar_db_num = second_derivative(f2, x=x, y=y, h=h)
-
-    d2m_bar_db_cal = reflection_model.conditional.second_derivatives_of_mean()[i][j]
-
-    assert all(abs(a - b) < 1e-5 for a, b in zip(d2m_bar_db_num, d2m_bar_db_cal))
-
-    # print 'OK'
-
-
-def test_d2L_dbij(i, j, reflection_model):
-
-    (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
-    R = reflection_model.R
-    mu2 = reflection_model.s2.length()
-    r = reflection_model.s0.length()
-    mobs = reflection_model.mobs
-    Sobs = reflection_model.sobs
-    ctot = reflection_model.ctot
-    s0 = reflection_model.s0
-
-    def compute_L(b1, b2, b3, b4, b5, b6):
-        model = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
-        sigma = model.sigma()
-        sigmap = R * sigma * R.transpose()
-        sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
-        sigma12 = matrix.col((sigmap[2], sigmap[5]))
-        sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
-        sigma22 = sigmap[8]
-
-        z = s0.length()
-        mubar = sigma12 * (1 / sigma22) * (z - mu2)
-        sigma_bar = sigma11 - sigma12 * (1 / sigma22) * sigma21
-
-        d = r - mu2
-        c_d = mubar - mobs
-        A = log(sigma22)
-        B = (1 / sigma22) * d ** 2
-        C = log(sigma_bar.determinant()) * ctot
-        D = (sigma_bar.inverse() * ctot * Sobs).trace()
-        E = (sigma_bar.inverse() * ctot * c_d * c_d.transpose()).trace()
-        return -0.5 * (A + B + C + D + E)
-
-    def f1(x):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        return compute_L(*params)
-
-    def f2(x, y):
-        params = [b1, b2, b3, b4, b5, b6]
-        params[i] = x
-        params[j] = y
-        return compute_L(*params)
-
-    h = 0.001
-
-    x = (b1, b2, b3, b4, b5, b6)[i]
-    y = (b1, b2, b3, b4, b5, b6)[j]
-
-    if i == j:
-        d2Ldb_num = second_derivative(f1, x=x, h=h)
-    else:
-        d2Ldb_num = second_derivative(f2, x=x, y=y, h=h)
-
-    d2Ldb_cal = reflection_model.second_derivatives()[i, j]
-
-    # print d2Ldb_cal, d2Ldb_num
-
-    assert abs(d2Ldb_num - d2Ldb_cal) < 1e-3
-
-    # print 'OK'
-
-
-def test_first_derivatives(reflection_model):
-    test_dSdb_22(reflection_model)
-    test_dS_bar_db(reflection_model)
-    test_dm_bar_db(reflection_model)
-    test_dLdb(reflection_model)
-
-
-def test_second_derivatives(reflection_model):
     for j in range(6):
         for i in range(6):
-            test_d2S_dbij(i, j, reflection_model)
-            test_d2S_bar_dbij(i, j, reflection_model)
-            test_d2m_bar_dbij(i, j, reflection_model)
-            test_d2L_dbij(i, j, reflection_model)
+            test_for_index(i, j)
 
 
-def test():
+@pytest.mark.parametrize("reflection_model", generate_testdata())
+def test_d2S_bar_dbij(reflection_model):
 
-    for i in range(10):
+    def test_for_index(i, j):
+        (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
+        R = reflection_model.R
+        mu2 = reflection_model.s2.length()
+        r = reflection_model.s0.length()
+        Sobs = reflection_model.sobs
+        ctot = reflection_model.ctot
 
-        (b1, b2, b3, b4, b5, b6), s0, s2, ctot, mobs, Sobs = generate_data()
+        def compute_Sbar(b1, b2, b3, b4, b5, b6):
+            model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+            sigma = model.sigma()
+            sigmap = R * sigma * R.transpose()
+            sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
+            sigma12 = matrix.col((sigmap[2], sigmap[5]))
+            sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
+            sigma22 = sigmap[8]
+            return sigma11 - sigma12 * (1 / sigma22) * sigma21
 
-        parameterisation = SimpleMosaicityParameterisation((b1, b2, b3, b4, b5, b6))
-        reflection_model = ReflectionData(
-            parameterisation, s0, s2, ctot, mobs, Sobs, second_derivatives=True
-        )
+        def f1(x):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            return compute_Sbar(*params)
 
-        test_first_derivatives(reflection_model)
-        test_second_derivatives(reflection_model)
+        def f2(x, y):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            params[j] = y
+            return compute_Sbar(*params)
 
-        print("OK")
+        h = 0.001
+
+        x = (b1, b2, b3, b4, b5, b6)[i]
+        y = (b1, b2, b3, b4, b5, b6)[j]
+
+        if i == j:
+            d2S_bar_db_num = second_derivative(f1, x=x, h=h)
+        else:
+            d2S_bar_db_num = second_derivative(f2, x=x, y=y, h=h)
+
+        d2S_bar_db_cal = reflection_model.conditional.second_derivatives_of_sigma()[i][j]
+
+        assert all(abs(a - b) < 1e-5 for a, b in zip(d2S_bar_db_num, d2S_bar_db_cal))
+
+    for j in range(6):
+        for i in range(6):
+            test_for_index(i, j)
 
 
-if __name__ == "__main__":
-    test()
+@pytest.mark.parametrize("reflection_model", generate_testdata())
+def test_d2m_bar_dbij(reflection_model):
+
+    def test_for_index(i, j):
+        (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
+
+        R = reflection_model.R
+        s0 = reflection_model.s0
+        mu2 = reflection_model.s2.length()
+        r = reflection_model.s0.length()
+        Sobs = reflection_model.sobs
+        ctot = reflection_model.ctot
+        epsilon = s0.length() - mu2
+
+        def compute_mu_bar(b1, b2, b3, b4, b5, b6):
+            model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+            sigma = model.sigma()
+            sigmap = R * sigma * R.transpose()
+            sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
+            sigma12 = matrix.col((sigmap[2], sigmap[5]))
+            sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
+            sigma22 = sigmap[8]
+            return sigma12 * (1 / sigma22) * epsilon
+
+        def f1(x):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            return compute_mu_bar(*params)
+
+        def f2(x, y):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            params[j] = y
+            return compute_mu_bar(*params)
+
+        h = 0.001
+
+        x = (b1, b2, b3, b4, b5, b6)[i]
+        y = (b1, b2, b3, b4, b5, b6)[j]
+
+        if i == j:
+            d2m_bar_db_num = second_derivative(f1, x=x, h=h)
+        else:
+            d2m_bar_db_num = second_derivative(f2, x=x, y=y, h=h)
+
+        d2m_bar_db_cal = reflection_model.conditional.second_derivatives_of_mean()[i][j]
+
+        assert all(abs(a - b) < 1e-5 for a, b in zip(d2m_bar_db_num, d2m_bar_db_cal))
+
+    for j in range(6):
+        for i in range(6):
+            test_for_index(i, j)
+
+@pytest.mark.parametrize("reflection_model", generate_testdata())
+def test_d2L_dbij(reflection_model):
+
+    def test_for_index(i, j):
+        (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
+        R = reflection_model.R
+        mu2 = reflection_model.s2.length()
+        r = reflection_model.s0.length()
+        mobs = reflection_model.mobs
+        Sobs = reflection_model.sobs
+        ctot = reflection_model.ctot
+        s0 = reflection_model.s0
+
+        def compute_L(b1, b2, b3, b4, b5, b6):
+            model = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
+            sigma = model.sigma()
+            sigmap = R * sigma * R.transpose()
+            sigma11 = matrix.sqr((sigmap[0], sigmap[1], sigmap[3], sigmap[4]))
+            sigma12 = matrix.col((sigmap[2], sigmap[5]))
+            sigma21 = matrix.col((sigmap[6], sigmap[7])).transpose()
+            sigma22 = sigmap[8]
+
+            z = s0.length()
+            mubar = sigma12 * (1 / sigma22) * (z - mu2)
+            sigma_bar = sigma11 - sigma12 * (1 / sigma22) * sigma21
+
+            d = r - mu2
+            c_d = mubar - mobs
+            A = log(sigma22)
+            B = (1 / sigma22) * d ** 2
+            C = log(sigma_bar.determinant()) * ctot
+            D = (sigma_bar.inverse() * ctot * Sobs).trace()
+            E = (sigma_bar.inverse() * ctot * c_d * c_d.transpose()).trace()
+            return -0.5 * (A + B + C + D + E)
+
+        def f1(x):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            return compute_L(*params)
+
+        def f2(x, y):
+            params = [b1, b2, b3, b4, b5, b6]
+            params[i] = x
+            params[j] = y
+            return compute_L(*params)
+
+        h = 0.001
+
+        x = (b1, b2, b3, b4, b5, b6)[i]
+        y = (b1, b2, b3, b4, b5, b6)[j]
+
+        if i == j:
+            d2Ldb_num = second_derivative(f1, x=x, h=h)
+        else:
+            d2Ldb_num = second_derivative(f2, x=x, y=y, h=h)
+
+        d2Ldb_cal = reflection_model.second_derivatives()[i, j]
+
+        # print d2Ldb_cal, d2Ldb_num
+
+        assert abs(d2Ldb_num - d2Ldb_cal) < 1e-3
+
+    for j in range(6):
+        for i in range(6):
+            test_for_index(i, j)

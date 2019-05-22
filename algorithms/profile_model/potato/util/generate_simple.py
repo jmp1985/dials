@@ -2,7 +2,7 @@ from numpy.random import normal, uniform, multivariate_normal
 from math import exp, pi, sqrt, log, sin, cos
 from dials.array_family import flex
 from scitbx import matrix
-from dials_scratch.jmp.stills.potato.profile_model import (
+from dials.algorithms.profile_model.potato.model import (
     compute_change_of_basis_operation,
 )
 from dials.algorithms.profile_model.gaussian_rs import CoordinateSystem2d

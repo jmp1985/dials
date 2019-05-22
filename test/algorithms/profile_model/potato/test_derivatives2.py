@@ -1,5 +1,6 @@
 from __future__ import division
 from __future__ import print_function
+import pytest
 from scitbx import matrix
 from math import log, pi
 from random import uniform, randint
@@ -60,6 +61,12 @@ def generate_data():
     return sigma, s0, s2
 
 
+def generate_testdata():
+    for i in range(10):
+        sigma, s0, (b1, b2, b3) = generate_data()
+        yield sigma, s0, b1, b2, b3
+
+
 def ds2_db(b1, b2, b3):
     return [matrix.col((1, 0, 0)), matrix.col((0, 1, 0)), matrix.col((0, 0, 1))]
 
@@ -68,6 +75,7 @@ def compute_s2(b1, b2, b3):
     return matrix.col((b1, b2, b3))
 
 
+@pytest.mark.parametrize("sigma,s0,b1,b2,b3", generate_testdata())
 def test_derivative_of_epsilon(sigma, s0, b1, b2, b3):
 
     ds2 = ds2_db(b1, b2, b3)
@@ -108,6 +116,7 @@ def test_derivative_of_epsilon(sigma, s0, b1, b2, b3):
     # print 'OK'
 
 
+@pytest.mark.parametrize("sigma,s0,b1,b2,b3", generate_testdata())
 def test_derivative_of_mubar(sigma, s0, b1, b2, b3):
 
     ds2 = ds2_db(b1, b2, b3)
@@ -156,6 +165,7 @@ def test_derivative_of_mubar(sigma, s0, b1, b2, b3):
     # print 'OK'
 
 
+@pytest.mark.parametrize("sigma,s0,b1,b2,b3", generate_testdata())
 def test_derivative_of_e1(sigma, s0, b1, b2, b3):
 
     ds2 = ds2_db(b1, b2, b3)
@@ -200,6 +210,7 @@ def test_derivative_of_e1(sigma, s0, b1, b2, b3):
     # print 'OK'
 
 
+@pytest.mark.parametrize("sigma,s0,b1,b2,b3", generate_testdata())
 def test_derivative_of_e2(sigma, s0, b1, b2, b3):
 
     ds2 = ds2_db(b1, b2, b3)
@@ -246,6 +257,7 @@ def test_derivative_of_e2(sigma, s0, b1, b2, b3):
     # print 'OK'
 
 
+@pytest.mark.parametrize("sigma,s0,b1,b2,b3", generate_testdata())
 def test_derivative_of_e3(sigma, s0, b1, b2, b3):
 
     ds2 = ds2_db(b1, b2, b3)
@@ -290,6 +302,7 @@ def test_derivative_of_e3(sigma, s0, b1, b2, b3):
     # print 'OK'
 
 
+@pytest.mark.parametrize("sigma,s0,b1,b2,b3", generate_testdata())
 def test_derivative_of_s1(sigma, s0, b1, b2, b3):
 
     ds2 = ds2_db(b1, b2, b3)
@@ -393,6 +406,7 @@ def test_derivative_of_s1(sigma, s0, b1, b2, b3):
     # print 'OK'
 
 
+@pytest.mark.parametrize("sigma,s0,b1,b2,b3", generate_testdata())
 def test_derivative_of_f(sigma, s0, b1, b2, b3):
 
     ds2 = ds2_db(b1, b2, b3)
@@ -533,22 +547,3 @@ def test_derivative_of_f(sigma, s0, b1, b2, b3):
     assert abs(db3_num - db3_cal) < 1e-7
 
 
-def test():
-
-    for i in range(10):
-
-        sigma, s0, (b1, b2, b3) = generate_data()
-
-        test_derivative_of_epsilon(sigma, s0, b1, b2, b3)
-        test_derivative_of_mubar(sigma, s0, b1, b2, b3)
-        test_derivative_of_e1(sigma, s0, b1, b2, b3)
-        test_derivative_of_e2(sigma, s0, b1, b2, b3)
-        test_derivative_of_e3(sigma, s0, b1, b2, b3)
-        test_derivative_of_s1(sigma, s0, b1, b2, b3)
-        test_derivative_of_f(sigma, s0, b1, b2, b3)
-
-        print("OK")
-
-
-if __name__ == "__main__":
-    test()

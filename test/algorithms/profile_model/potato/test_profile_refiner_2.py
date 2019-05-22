@@ -3,15 +3,15 @@ from __future__ import print_function
 import numpy.random
 from scitbx import matrix
 from math import sqrt, pi, sin, cos, log, exp, ceil
-from dials_scratch.jmp.potato.util.simplex import SimpleSimplex
-from dials_scratch.jmp.potato.util.generate_simple import generate_from_reflections
-from dials_scratch.jmp.potato.util.generate_simple import (
+from dials.algorithms.profile_model.potato.util.simplex import SimpleSimplex
+from dials.algorithms.profile_model.potato.util.generate_simple import generate_from_reflections
+from dials.algorithms.profile_model.potato.util.generate_simple import (
     generate_from_reflections_binned,
 )
-from dials_scratch.jmp.potato.model import compute_change_of_basis_operation
-from dials_scratch.jmp.potato.profile_refiner import ProfileRefiner
-from dials_scratch.jmp.potato.profile_refiner import ProfileRefinerData
-from dials_scratch.jmp.potato.parameterisation import SimpleMosaicityParameterisation
+from dials.algorithms.profile_model.potato.model import compute_change_of_basis_operation
+from dials.algorithms.profile_model.potato.profile_refiner import ProfileRefiner
+from dials.algorithms.profile_model.potato.profile_refiner import ProfileRefinerData
+from dials.algorithms.profile_model.potato.parameterisation import Simple6MosaicityParameterisation
 from dxtbx.model.experiment_list import ExperimentListFactory
 from dials.array_family import flex
 from numpy.random import choice as sample
@@ -148,7 +148,7 @@ def tst_ideal():
     values = flex.double((sqrt(1.1e-6), 0, sqrt(2.1e-6), 0, 0, sqrt(3.1e-6)))
     offset = flex.double([sqrt(1e-7) for v in values])
 
-    parameterisation = SimpleMosaicityParameterisation((1, 0, 1, 0, 0, 1))
+    parameterisation = Simple6MosaicityParameterisation((1, 0, 1, 0, 0, 1))
     Sobs_list = flex.double(Sobs_list)
     data = ProfileRefinerData(s0, s2_list, ctot_list, xbar_list, Sobs_list)
     refiner = ProfileRefiner(parameterisation, data)
@@ -230,7 +230,7 @@ def tst_binned():
     values = flex.double((sqrt(1e-6), 0, sqrt(2e-6), 0, 0, sqrt(3e-6)))
     offset = flex.double([sqrt(1e-7) for v in values])
 
-    parameterisation = SimpleMosaicityParameterisation((1, 0, 1, 0, 0, 1))
+    parameterisation = Simple6MosaicityParameterisation((1, 0, 1, 0, 0, 1))
     Sobs_list = flex.double(Sobs_list)
     data = ProfileRefinerData(s0, s2_list, ctot_list, xbar_list, Sobs_list)
     refiner = ProfileRefiner(parameterisation, data)

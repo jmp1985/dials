@@ -1,16 +1,24 @@
 from __future__ import division
 import scitbx.linalg
-from dials_scratch.jmp.potato.parameterisation import Simple1MosaicityParameterisation
-from dials_scratch.jmp.potato.parameterisation import Simple6MosaicityParameterisation
-from dials_scratch.jmp.potato.parameterisation import Angular2MosaicityParameterisation
-from dials_scratch.jmp.potato.parameterisation import Angular4MosaicityParameterisation
+from dials.algorithms.profile_model.potato.parameterisation import (
+    Simple1MosaicityParameterisation,
+)
+from dials.algorithms.profile_model.potato.parameterisation import (
+    Simple6MosaicityParameterisation,
+)
+from dials.algorithms.profile_model.potato.parameterisation import (
+    Angular2MosaicityParameterisation,
+)
+from dials.algorithms.profile_model.potato.parameterisation import (
+    Angular4MosaicityParameterisation,
+)
 from scitbx.linalg import eigensystem, l_l_transpose_cholesky_decomposition_in_place
-from dials_scratch.jmp.potato import PredictorAngular
-from dials_scratch.jmp.potato import PredictorSimple
-from dials_scratch.jmp.potato import BBoxCalculatorAngular
-from dials_scratch.jmp.potato import BBoxCalculatorSimple
-from dials_scratch.jmp.potato import MaskCalculatorAngular
-from dials_scratch.jmp.potato import MaskCalculatorSimple
+from dials.algorithms.profile_model.potato import PredictorAngular
+from dials.algorithms.profile_model.potato import PredictorSimple
+from dials.algorithms.profile_model.potato import BBoxCalculatorAngular
+from dials.algorithms.profile_model.potato import BBoxCalculatorSimple
+from dials.algorithms.profile_model.potato import MaskCalculatorAngular
+from dials.algorithms.profile_model.potato import MaskCalculatorSimple
 from dials.array_family import flex
 from scitbx import matrix
 from math import exp, sqrt

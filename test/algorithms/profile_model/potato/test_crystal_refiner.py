@@ -4,9 +4,8 @@ from libtbx.phil import parse
 from math import sqrt, exp, pi, acos
 from random import sample, seed
 from scitbx import matrix
-from dials_scratch.jmp.potato.crystal_refiner import CrystalRefiner
-from dials_scratch.jmp.potato.model import SimpleMosaicityModel
-from dials_scratch.jmp.potato.model import compute_change_of_basis_operation
+from dials.algorithms.profile_model.potato.crystal_refiner import CrystalRefiner
+from dials.algorithms.profile_model.potato.model import compute_change_of_basis_operation
 from dxtbx.model.experiment_list import ExperimentListFactory
 from dials.array_family import flex
 
@@ -132,7 +131,7 @@ def test_simplex():
     R = m2.axis_and_angle_as_r3_rotation_matrix(angle=0.5, deg=True)
     experiments[0].crystal.set_U(R * U)
 
-    model = SimpleMosaicityModel(sigma)
+    model = Simple6MosaicityModel(sigma)
 
     # Do the refinement
     refiner = CrystalRefiner(experiments[0], reflections, model)

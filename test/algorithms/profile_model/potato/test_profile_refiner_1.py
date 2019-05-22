@@ -4,14 +4,14 @@ from __future__ import print_function
 import numpy.random
 from scitbx import matrix
 from math import sqrt, pi, sin, cos, log, exp, ceil
-from dials_scratch.jmp.potato.util.generate_simple import generate_simple
-from dials_scratch.jmp.potato.util.generate_simple import generate_simple_binned
-from dials_scratch.jmp.potato.util.simplex import SimpleSimplex
-from dials_scratch.jmp.potato.model import compute_change_of_basis_operation
-from dials_scratch.jmp.potato.parameterisation import SimpleMosaicityParameterisation
-from dials_scratch.jmp.potato.profile_refiner import MaximumLikelihoodTarget
-from dials_scratch.jmp.potato.profile_refiner import ProfileRefiner
-from dials_scratch.jmp.potato.profile_refiner import ProfileRefinerData
+from dials.algorithms.profile_model.potato.util.generate_simple import generate_simple
+from dials.algorithms.profile_model.potato.util.generate_simple import generate_simple_binned
+from dials.algorithms.profile_model.potato.util.simplex import SimpleSimplex
+from dials.algorithms.profile_model.potato.model import compute_change_of_basis_operation
+from dials.algorithms.profile_model.potato.parameterisation import Simple6MosaicityParameterisation
+from dials.algorithms.profile_model.potato.profile_refiner import MaximumLikelihoodTarget
+from dials.algorithms.profile_model.potato.profile_refiner import ProfileRefiner
+from dials.algorithms.profile_model.potato.profile_refiner import ProfileRefinerData
 from dials.array_family import flex
 
 
@@ -213,7 +213,7 @@ def tst_ml_target_class():
 
         def target(self, params):
 
-            parameterisation = SimpleMosaicityParameterisation(params)
+            parameterisation = Simple6MosaicityParameterisation(params)
 
             t = MaximumLikelihoodTarget(
                 parameterisation,
@@ -301,7 +301,7 @@ def tst_ml_target_class_2():
 
     Sobs_list = flex.double(Sobs_list)
 
-    parameterisation = SimpleMosaicityParameterisation((1, 0, 1, 0, 0, 1))
+    parameterisation = Simple6MosaicityParameterisation((1, 0, 1, 0, 0, 1))
 
     data = ProfileRefinerData(s0, s2_list, ctot_list, xbar_list, Sobs_list)
     refiner = ProfileRefiner(parameterisation, data)

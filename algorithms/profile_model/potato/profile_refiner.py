@@ -3,8 +3,10 @@ from scitbx import matrix
 from scitbx import linalg
 from dials.array_family import flex
 from dials.algorithms.profile_model.gaussian_rs import CoordinateSystem2d
-from dials_scratch.jmp.potato.model import compute_change_of_basis_operation
-from dials_scratch.jmp.potato.util.simplex import SimpleSimplex
+from dials.algorithms.profile_model.potato.model import (
+    compute_change_of_basis_operation,
+)
+from dials.algorithms.profile_model.potato.util.simplex import SimpleSimplex
 from math import log, sqrt, pi
 import logging
 

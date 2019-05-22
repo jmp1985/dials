@@ -712,8 +712,8 @@ class ModelState(object):
             active_params.extend(self.get_B_params())
         if not self._is_mosaic_spread_fixed:
             active_params.extend(self.get_M_params())
-        if not self._is_wavelength_spread_fixed:
-            active_params.extend(self.get_L_params())
+        # if not self._is_wavelength_spread_fixed:
+        #     active_params.extend(self.get_L_params())
         assert len(active_params) > 0
         return active_params
 
@@ -734,10 +734,10 @@ class ModelState(object):
             temp = params[: self.num_M_params()]
             params = params[self.num_M_params() :]
             self.set_M_params(temp)
-        if not self._is_wavelength_spread_fixed:
-            temp = params[: self.num_L_params()]
-            params = params[self.num_L_params() :]
-            self.set_L_params(temp)
+        # if not self._is_wavelength_spread_fixed:
+        #     temp = params[: self.num_L_params()]
+            # params = params[self.num_L_params() :]
+            # self.set_L_params(temp)
 
     def get_labels(self):
         """
