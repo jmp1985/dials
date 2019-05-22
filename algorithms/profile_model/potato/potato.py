@@ -299,7 +299,6 @@ class Indexer(object):
         """
     Filter reflections too far from predicted position
 
-<<<<<<< HEAD
     """
 
         # Compute the x and y residuals
