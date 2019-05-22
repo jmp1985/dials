@@ -467,7 +467,7 @@ def generate_data(experiments, reflections):
         uniform(1e-3, 3e-3),
     )
 
-    S_param = (b1, b2, b3, b4, b5, b6) 
+    S_param = (b1, b2, b3, b4, b5, b6)
     L_param = (uniform(1e-3, 2e-3),)
     ctot = randint(100, 1000)
 
@@ -524,7 +524,7 @@ def test_ReflectionModelState_derivatives(testdata):
 
         U_params = models[1].get_param_vals()
         B_params = models[2].get_param_vals()
-        M_params = flex.double(models[0][:mosaicity_parameterisation.num_parameters()])
+        M_params = flex.double(models[0][: mosaicity_parameterisation.num_parameters()])
         L_params = flex.double(models[3])
 
         state = ModelState(
@@ -606,7 +606,7 @@ def test_ReflectionModelState_derivatives(testdata):
 
         for n, c in zip(dl_num, dL_dp):
             assert abs(n - c) < 1e-7
-    
+
     S1 = Simple1MosaicityParameterisation()
     S6 = Simple6MosaicityParameterisation()
     W = WavelengthSpreadParameterisation()
