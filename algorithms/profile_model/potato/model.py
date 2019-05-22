@@ -468,13 +468,3 @@ def compute_change_of_basis_operation(s0, s2):
     return R
 
 
-def compute_change_of_basis_operation2(s0, r):
-    """
-  Compute the change of basis operation that puts the r vector along the z axis
-
-  """
-    e1 = r.cross(s0).normalize()
-    e2 = r.cross(e1).normalize()
-    e3 = r.normalize()
-    R = matrix.sqr(e1.elems + e2.elems + e3.elems)
-    return R
