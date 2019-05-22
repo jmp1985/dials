@@ -84,8 +84,7 @@ phil_scope = phil.parse(
 
 
 def generate_mask(
-    experiments,  # type: ExperimentList
-    params,  # type: phil.scope_extract
+    experiments, params  # type: ExperimentList  # type: phil.scope_extract
 ):
     # type: (...) -> Tuple[Masks, Optional[ExperimentList]]
     """
