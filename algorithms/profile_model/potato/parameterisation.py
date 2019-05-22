@@ -328,33 +328,14 @@ class WavelengthSpreadParameterisation(object):
     Compute the covariance matrix of the MVN from the parameters
 
     """
-        M = matrix.sqr((0, 0, 0, 0, 0, 0, 0, 0, self.params[0]))
-        return M * M.transpose()
+        return flex.double([self.params[0] ** 2])
 
     def first_derivatives(self):
         """
     Compute the first derivatives of Sigma w.r.t the parameters
 
     """
-        l1 = self.params[0]
-
-        dSdl1 = (0, 0, 0, 0, 0, 0, 0, 0, 2 * l1)
-
-        return flex.mat3_double([dSdl1])
-
-    def second_derivatives(self):
-        """
-    Compute the second derivatives of Sigma w.r.t the parameters
-
-    """
-        l1 = self.params[0]
-
-        d11 = (0, 0, 0, 0, 0, 0, 0, 0, 2)
-
-        d2 = flex.mat3_double([d11])
-        d2.reshape(flex.grid(1, 1))
-
-        return d2
+        return flex.double([2 * self.params[0]])
 
 
 class Angular2MosaicityParameterisation(object):
@@ -519,6 +500,7 @@ class ModelState(object):
         self,
         experiment,
         mosaicity_parameterisation,
+        wavelength_parameterisation=None,
         fix_mosaic_spread=False,
         fix_wavelength_spread=False,
         fix_unit_cell=False,
@@ -537,14 +519,19 @@ class ModelState(object):
         self.U_parameterisation = CrystalOrientationParameterisation(self.crystal)
         self.B_parameterisation = CrystalUnitCellParameterisation(self.crystal)
 
-        # The M, L and W parameterisations
+        # The M and L parameterisations
         self.M_parameterisation = mosaicity_parameterisation
+        self.L_parameterisation = wavelength_parameterisation
 
         # Set the flags to fix parameters
         self._is_mosaic_spread_fixed = fix_mosaic_spread
         self._is_wavelength_spread_fixed = fix_wavelength_spread
         self._is_unit_cell_fixed = fix_unit_cell
         self._is_orientation_fixed = fix_orientation
+
+        # Check wavelength parameterisation
+        if not self._is_wavelength_spread_fixed:
+            assert self.L_parameterisation is not None
 
     def is_orientation_fixed(self):
         """
@@ -616,6 +603,15 @@ class ModelState(object):
     """
         return self.M_parameterisation.sigma()
 
+    def get_L(self):
+        """
+        Get the L sigma
+
+        """
+        if self.L_parameterisation is not None:
+            return self.L_parameterisation.sigma()
+        return flex.double()
+
     def get_U_params(self):
         """
     Get the U parameters
@@ -636,6 +632,15 @@ class ModelState(object):
 
     """
         return self.M_parameterisation.parameters()
+
+    def get_L_params(self):
+        """
+        Get the L parameters
+
+        """
+        if self.L_parameterisation is not None:
+            return self.L_parameterisation.parameters()
+        return []
 
     def set_U_params(self, params):
         """
@@ -658,6 +663,14 @@ class ModelState(object):
     """
         return self.M_parameterisation.set_parameters(params)
 
+    def set_L_params(self, params):
+        """
+    Set the L parameters
+
+    """
+        if self.L_parameterisation is not None:
+            return self.L_parameterisation.set_parameters(params)
+
     def num_U_params(self):
         """
     Get the number of U parameters
@@ -678,6 +691,13 @@ class ModelState(object):
 
     """
         return len(self.get_M_params())
+
+    def num_L_params(self):
+        """
+    Get the number of L parameters
+
+    """
+        return len(self.get_L_params())
 
     def get_dU_dp(self):
         """
@@ -700,6 +720,15 @@ class ModelState(object):
     """
         return self.M_parameterisation.first_derivatives()
 
+    def get_dL_dp(self):
+        """
+    Get the first derivatives of L w.r.t its parameters
+
+    """
+        if self.L_parameterisation is not None:
+            return self.L_parameterisation.first_derivatives()
+        return flex.double()
+
     def get_active_parameters(self):
         """
     Get the active parameters in order: U, B, M, L, W
@@ -712,8 +741,8 @@ class ModelState(object):
             active_params.extend(self.get_B_params())
         if not self._is_mosaic_spread_fixed:
             active_params.extend(self.get_M_params())
-        # if not self._is_wavelength_spread_fixed:
-        #     active_params.extend(self.get_L_params())
+        if not self._is_wavelength_spread_fixed:
+            active_params.extend(self.get_L_params())
         assert len(active_params) > 0
         return active_params
 
@@ -734,10 +763,10 @@ class ModelState(object):
             temp = params[: self.num_M_params()]
             params = params[self.num_M_params() :]
             self.set_M_params(temp)
-        # if not self._is_wavelength_spread_fixed:
-        #     temp = params[: self.num_L_params()]
-            # params = params[self.num_L_params() :]
-            # self.set_L_params(temp)
+        if not self._is_wavelength_spread_fixed:
+            temp = params[: self.num_L_params()]
+            params = params[self.num_L_params() :]
+            self.set_L_params(temp)
 
     def get_labels(self):
         """
@@ -777,13 +806,14 @@ class ReflectionModelState(object):
         U = state.get_U()
         B = state.get_B()
         M = state.get_M()
+        L = state.get_L()
 
         # Compute the reciprocal lattice vector
         h = matrix.col(h)
         r = A * h
         t = r.length()
 
-        # Define rotation for L and W sigma components
+        # Define rotation for W sigma components
         q1 = r.cross(s0).normalize()
         q2 = r.cross(q1).normalize()
         q3 = r.normalize()
@@ -805,16 +835,27 @@ class ReflectionModelState(object):
         dU_dp = state.get_dU_dp()
         dB_dp = state.get_dB_dp()
         dM_dp = state.get_dM_dp()
+        dL_dp = state.get_dL_dp()
+
+        # Get the wavelength spread
+        assert len(L) == len(dL_dp)
+        if len(L) == 0:
+            self._sigma_lambda = 0
+        else:
+            assert len(L) == 1
+            self._sigma_lambda = L[0]
 
         # The array of derivatives
         self._dr_dp = flex.vec3_double()
         self._ds_dp = flex.mat3_double()
+        self._dl_dp = flex.double()
 
         # Compute derivatives w.r.t U parameters
         if not state.is_orientation_fixed():
 
             dr_dp_u = flex.vec3_double(state.num_U_params())
             ds_dp_u = flex.mat3_double(state.num_U_params())
+            dl_dp_u = flex.double(state.num_U_params())
             for i in range(state.num_U_params()):
                 dr_dp_u[i] = matrix.sqr(dU_dp[i]) * B * h
                 # dr = matrix.col(dr_dp_u[i])
@@ -837,12 +878,14 @@ class ReflectionModelState(object):
                 #            + t*Q*(L+W)*dQ.transpose()
             self._dr_dp.extend(dr_dp_u)
             self._ds_dp.extend(ds_dp_u)
+            self._dl_dp.extend(dl_dp_u)
 
         # Compute derivatives w.r.t B parameters
         if not state.is_unit_cell_fixed():
 
             dr_dp_b = flex.vec3_double(state.num_B_params())
             ds_dp_b = flex.mat3_double(state.num_B_params())
+            dl_dp_b = flex.double(state.num_B_params())
             for i in range(state.num_B_params()):
                 dr_dp_b[i] = U * matrix.sqr(dB_dp[i]) * h
                 # dr = matrix.col(dr_dp_b[i])
@@ -865,11 +908,13 @@ class ReflectionModelState(object):
                 #            + t*Q*(L+W)*dQ.transpose()
             self._dr_dp.extend(dr_dp_b)
             self._ds_dp.extend(ds_dp_b)
+            self._dl_dp.extend(dl_dp_b)
 
         # Compute derivatives w.r.t M parameters
         if not state.is_mosaic_spread_fixed():
             dr_dp_m = flex.vec3_double(state.num_M_params())
             ds_dp_m = flex.mat3_double(state.num_M_params())
+            dl_dp_m = flex.double(state.num_M_params())
             if state.is_mosaic_spread_angular():
                 for i in range(state.num_M_params()):
                     dr_dp_m[i] = (0, 0, 0)
@@ -880,53 +925,54 @@ class ReflectionModelState(object):
                     ds_dp_m[i] = dM_dp[i]
             self._dr_dp.extend(dr_dp_m)
             self._ds_dp.extend(ds_dp_m)
+            self._dl_dp.extend(dl_dp_m)
 
         # Compute derivatives w.r.t L parameters
-        # if not state.is_wavelength_spread_fixed():
-
-        #   dr_dp_l = flex.vec3_double(state.num_L_params())
-        #   ds_dp_l = flex.mat3_double(state.num_L_params())
-        #   for i in range(state.num_L_params()):
-        #     dr_dp_l[i] = (0, 0, 0)
-        #     ds_dp_l[i] = t*Q*matrix.sqr(dL_dp[i])*Q.transpose()
-        #   self._dr_dp.extend(dr_dp_l)
-        #   self._ds_dp.extend(ds_dp_l)
-
-        # # Compute derivatives w.r.t W parameters
-        # if not state.is_angular_mosaicity_fixed():
-
-        #   dr_dp_w = flex.vec3_double(state.num_W_params())
-        #   ds_dp_w = flex.mat3_double(state.num_W_params())
-        #   for i in range(state.num_W_params()):
-        #     dr_dp_w[i] = (0, 0, 0)
-        #     ds_dp_w[i] = t*Q*matrix.sqr(dW_dp[i])*Q.transpose()
-        #   self._dr_dp.extend(dr_dp_w)
-        #   self._ds_dp.extend(ds_dp_w)
+        if not state.is_wavelength_spread_fixed():
+            dr_dp_l = flex.vec3_double(state.num_L_params())
+            ds_dp_l = flex.mat3_double(state.num_L_params())
+            self._dr_dp.extend(dr_dp_l)
+            self._ds_dp.extend(ds_dp_l)
+            self._dl_dp.extend(dL_dp)
 
     def get_sigma(self):
         """
-    Return the covariance matrix
+        Return the covariance matrix
 
-    """
+        """
         return self._sigma
 
     def get_r(self):
         """
-    Return the reciprocal lattice vector
+        Return the reciprocal lattice vector
 
-    """
+        """
         return self._r
 
     def get_dS_dp(self):
         """
-    Return the derivatives of the covariance matrix
+        Return the derivatives of the covariance matrix
 
-    """
+        """
         return self._ds_dp
 
     def get_dr_dp(self):
         """
-    Return the derivatives of the reciprocal lattice vector
+        Return the derivatives of the reciprocal lattice vector
 
-    """
+        """
         return self._dr_dp
+
+    def get_sigma_lambda(self):
+        """
+        Return the wavelength spread
+
+        """
+        return self._sigma_lambda
+
+    def get_dL_dp(self):
+        """
+        Return the derivatives of the wavelength spread
+
+        """
+        return self._dl_dp
