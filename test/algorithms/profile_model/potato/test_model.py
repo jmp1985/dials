@@ -127,9 +127,9 @@ def test_Simple1ProfileModel_predict_reflections(
     s0 = matrix.col(experiments[0].beam.get_s0())
     quantile = chisq_quantile(3, 0.9973)
     sigma_inv = matrix.sqr(simple1_profile_model.sigma()).inverse()
-    
+
     for s2 in map(matrix.col, reflections["s2"]):
-        x = s2.normalize()*s0.length()-s2
+        x = s2.normalize() * s0.length() - s2
         d = (x.transpose() * sigma_inv * x)[0]
         assert d < quantile
 
@@ -208,7 +208,9 @@ def test_Simple6ProfileModel_update_model(simple6_profile_model, simple6_model_s
     check_simple6_sigma(sigma, params)
 
 
-def test_Simple6ProfileModel_predict_reflections(simple6_profile_model, dials_regression):
+def test_Simple6ProfileModel_predict_reflections(
+    simple6_profile_model, dials_regression
+):
     experiments = ExperimentListFactory.from_json_file(
         os.path.join(dials_regression, "potato_test_data", "experiments.json")
     )
@@ -231,9 +233,9 @@ def test_Simple6ProfileModel_predict_reflections(simple6_profile_model, dials_re
     s0 = matrix.col(experiments[0].beam.get_s0())
     quantile = chisq_quantile(3, 0.9973)
     sigma_inv = matrix.sqr(simple6_profile_model.sigma()).inverse()
-    
+
     for s2 in map(matrix.col, reflections["s2"]):
-        x = s2.normalize()*s0.length()-s2
+        x = s2.normalize() * s0.length() - s2
         d = (x.transpose() * sigma_inv * x)[0]
         assert d < quantile
 
@@ -261,13 +263,14 @@ def test_Simple6ProfileModel_compute_bbox(simple6_profile_model, dials_regressio
     s0 = matrix.col(experiments[0].beam.get_s0())
     quantile = chisq_quantile(3, 0.9973)
     sigma_inv = matrix.sqr(simple6_profile_model.sigma()).inverse()
-    
+
     for s2 in map(matrix.col, reflections["s2"]):
-        x = s2.normalize()*s0.length()-s2
+        x = s2.normalize() * s0.length() - s2
         d = (x.transpose() * sigma_inv * x)[0]
         assert d < quantile
 
     simple6_profile_model.compute_bbox(experiments, reflections)
+
 
 def test_Simple6ProfileModel_compute_mask(simple6_profile_model, dials_regression):
     experiments = ExperimentListFactory.from_json_file(
@@ -292,9 +295,9 @@ def test_Simple6ProfileModel_compute_mask(simple6_profile_model, dials_regressio
     s0 = matrix.col(experiments[0].beam.get_s0())
     quantile = chisq_quantile(3, 0.9973)
     sigma_inv = matrix.sqr(simple6_profile_model.sigma()).inverse()
-    
+
     for s2 in map(matrix.col, reflections["s2"]):
-        x = s2.normalize()*s0.length()-s2
+        x = s2.normalize() * s0.length() - s2
         d = (x.transpose() * sigma_inv * x)[0]
         assert d < quantile
 
