@@ -5,7 +5,9 @@ from math import sqrt, exp, pi, acos
 from random import sample, seed
 from scitbx import matrix
 from dials.algorithms.profile_model.potato.crystal_refiner import CrystalRefiner
-from dials.algorithms.profile_model.potato.model import compute_change_of_basis_operation
+from dials.algorithms.profile_model.potato.model import (
+    compute_change_of_basis_operation,
+)
 from dxtbx.model.experiment_list import ExperimentListFactory
 from dials.array_family import flex
 

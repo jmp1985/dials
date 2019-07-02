@@ -4,32 +4,16 @@ import pytest
 from scitbx import matrix
 from math import log, pi
 from random import uniform, randint
-from dials.algorithms.profile_model.potato.parameterisation import Simple6MosaicityParameterisation
-from dials.algorithms.profile_model.potato.profile_refiner import ReflectionData
+from dials.algorithms.profile_model.potato.parameterisation import (
+    Simple6MosaicityParameterisation,
+)
+from dials.algorithms.profile_model.potato.refiner import RefinerData
+
 
 def first_derivative(func, x, h):
     return (-func(x + 2 * h) + 8 * func(x + h) - 8 * func(x - h) + func(x - 2 * h)) / (
         12 * h
     )
-
-
-def second_derivative(func, x, y=None, h=None):
-    if y is None:
-        A = func(x + 2 * h)
-        B = func(x + h)
-        C = func(x)
-        D = func(x - h)
-        E = func(x - 2 * h)
-        return (-(1 / 12) * (A + E) + (4 / 3) * (B + D) - (5 / 2) * C) / h ** 2
-    else:
-        A = func(x - h, y - h)
-        B = func(x - h, y)
-        C = func(x, y - h)
-        D = func(x, y)
-        E = func(x, y + h)
-        F = func(x + h, y)
-        G = func(x + h, y + h)
-        return (A - B - C + 2 * D - E - F + G) / (2 * h ** 2)
 
 
 def generate_data():
@@ -63,6 +47,7 @@ def generate_data():
 
     return (b1, b2, b3, b4, b5, b6), s0, s2, ctot, X, S
 
+
 def generate_testdata():
 
     for i in range(10):
@@ -70,12 +55,9 @@ def generate_testdata():
         (b1, b2, b3, b4, b5, b6), s0, s2, ctot, mobs, Sobs = generate_data()
 
         parameterisation = Simple6MosaicityParameterisation((b1, b2, b3, b4, b5, b6))
-        reflection_model = ReflectionData(
-            parameterisation, s0, s2, ctot, mobs, Sobs, second_derivatives=True
-        )
+        reflection_model = RefinerData(parameterisation, s0, s2, ctot, mobs, Sobs)
 
         yield reflection_model
-
 
 
 @pytest.mark.parametrize("reflection_model", generate_testdata())
@@ -349,7 +331,6 @@ def test_dLdb(reflection_model):
 
 @pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_d2S_dbij(reflection_model):
-
     def test_for_index(i, j):
         (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
         R = reflection_model.R
@@ -400,7 +381,6 @@ def test_d2S_dbij(reflection_model):
 
 @pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_d2S_bar_dbij(reflection_model):
-
     def test_for_index(i, j):
         (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
         R = reflection_model.R
@@ -440,7 +420,9 @@ def test_d2S_bar_dbij(reflection_model):
         else:
             d2S_bar_db_num = second_derivative(f2, x=x, y=y, h=h)
 
-        d2S_bar_db_cal = reflection_model.conditional.second_derivatives_of_sigma()[i][j]
+        d2S_bar_db_cal = reflection_model.conditional.second_derivatives_of_sigma()[i][
+            j
+        ]
 
         assert all(abs(a - b) < 1e-5 for a, b in zip(d2S_bar_db_num, d2S_bar_db_cal))
 
@@ -451,7 +433,6 @@ def test_d2S_bar_dbij(reflection_model):
 
 @pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_d2m_bar_dbij(reflection_model):
-
     def test_for_index(i, j):
         (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
 
@@ -502,9 +483,9 @@ def test_d2m_bar_dbij(reflection_model):
         for i in range(6):
             test_for_index(i, j)
 
+
 @pytest.mark.parametrize("reflection_model", generate_testdata())
 def test_d2L_dbij(reflection_model):
-
     def test_for_index(i, j):
         (b1, b2, b3, b4, b5, b6) = reflection_model.model.parameters()
         R = reflection_model.R

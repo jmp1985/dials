@@ -4,14 +4,20 @@ import numpy.random
 from scitbx import matrix
 from math import sqrt, pi, sin, cos, log, exp, ceil
 from dials.algorithms.profile_model.potato.util.simplex import SimpleSimplex
-from dials.algorithms.profile_model.potato.util.generate_simple import generate_from_reflections
+from dials.algorithms.profile_model.potato.util.generate_simple import (
+    generate_from_reflections,
+)
 from dials.algorithms.profile_model.potato.util.generate_simple import (
     generate_from_reflections_binned,
 )
-from dials.algorithms.profile_model.potato.model import compute_change_of_basis_operation
+from dials.algorithms.profile_model.potato.model import (
+    compute_change_of_basis_operation,
+)
 from dials.algorithms.profile_model.potato.profile_refiner import ProfileRefiner
 from dials.algorithms.profile_model.potato.profile_refiner import ProfileRefinerData
-from dials.algorithms.profile_model.potato.parameterisation import Simple6MosaicityParameterisation
+from dials.algorithms.profile_model.potato.parameterisation import (
+    Simple6MosaicityParameterisation,
+)
 from dxtbx.model.experiment_list import ExperimentListFactory
 from dials.array_family import flex
 from numpy.random import choice as sample

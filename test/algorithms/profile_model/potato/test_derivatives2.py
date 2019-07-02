@@ -545,5 +545,3 @@ def test_derivative_of_f(sigma, s0, b1, b2, b3):
     assert abs(db1_num - db1_cal) < 1e-7
     assert abs(db2_num - db2_cal) < 1e-7
     assert abs(db3_num - db3_cal) < 1e-7
-
-

@@ -4,11 +4,15 @@ import numpy.random
 from scitbx import matrix
 from math import sqrt, pi, sin, cos, log, exp, ceil
 from dials.algorithms.profile_model.potato.util.simplex import SimpleSimplex
-from dials.algorithms.profile_model.potato.util.generate_simple import generate_from_reflections2
+from dials.algorithms.profile_model.potato.util.generate_simple import (
+    generate_from_reflections2,
+)
 from dials.algorithms.profile_model.potato.util.generate_simple import (
     generate_from_reflections_binned,
 )
-from dials.algorithms.profile_model.potato.model import compute_change_of_basis_operation
+from dials.algorithms.profile_model.potato.model import (
+    compute_change_of_basis_operation,
+)
 from dials.algorithms.profile_model.potato.refiner import Refiner
 from dials.algorithms.profile_model.potato.refiner import RefinerData
 from dials.algorithms.profile_model.potato.parameterisation import ModelState
