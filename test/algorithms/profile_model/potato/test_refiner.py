@@ -23,6 +23,8 @@ from dials.algorithms.profile_model.potato.parameterisation import (
 )
 from dials.algorithms.profile_model.potato.model import (
     compute_change_of_basis_operation,
+    Simple1ProfileModel,
+    Simple6ProfileModel,
 )
 from dials.algorithms.profile_model.potato.refiner import (
     ConditionalDistribution,
@@ -30,6 +32,7 @@ from dials.algorithms.profile_model.potato.refiner import (
     rotate_mat3_double,
     ReflectionLikelihood,
     RefinerData,
+    Refiner,
 )
 
 
@@ -122,6 +125,55 @@ def testdata(dials_regression):
         mobs=mobs,
         Sobs=Sobs,
     )
+
+
+@pytest.fixture
+def refinerdata_testdata(testdata):
+
+    experiment = testdata.experiment
+    reflections = testdata.reflections
+
+    panel = experiment.detector[0]
+    s0_length = matrix.col(experiment.beam.get_s0()).length()
+    reflections["bbox"] = flex.int6(len(reflections))
+    reflections["xyzobs.px.value"] = flex.vec3_double(len(reflections))
+    reflections["s2"] = reflections["s1"].each_normalize() * s0_length
+    reflections["sp"] = flex.vec3_double(len(reflections))
+    for i, (x, y, z) in enumerate(reflections["xyzcal.px"]):
+        x0 = int(x) - 5
+        x1 = int(x) + 5 + 1
+        y0 = int(y) - 5
+        y1 = int(y) + 5 + 1
+        z0 = int(z)
+        z1 = z0 + 1
+        reflections["bbox"][i] = x0, x1, y0, y1, z0, z1
+        reflections["xyzobs.px.value"][i] = (int(x) + 0.5, int(y) + 0.5, int(z) + 0.5)
+        reflections["sp"][i] = (
+            matrix.col(
+                panel.get_pixel_lab_coord(reflections["xyzobs.px.value"][i][0:2])
+            ).normalize()
+            * s0_length
+        )
+
+    reflections["shoebox"] = flex.shoebox(
+        reflections["panel"], reflections["bbox"], allocate=True
+    )
+
+    shoebox_data = flex.float(flex.grid(1, 11, 11))
+    shoebox_mask = flex.int(flex.grid(1, 11, 11))
+    for j in range(11):
+        for i in range(11):
+            shoebox_data[0, j, i] = (
+                100
+                * exp(-0.5 * (j - 5) ** 2 / 1 ** 2)
+                * exp(-0.5 * (i - 5) ** 2 / 1 ** 2)
+            )
+            shoebox_mask[0, j, i] = 5
+    for sbox in reflections["shoebox"]:
+        sbox.data = shoebox_data
+        sbox.mask = shoebox_mask
+
+    return RefinerData.from_reflections(experiment, reflections)
 
 
 def test_ConditionalDistribution(testdata):
@@ -356,8 +408,51 @@ def test_ReflectionLikelihood(testdata):
     check(S6, None, fix_wavelength_spread=True, fix_orientation=True)
 
 
-def test_Refiner():
-    pass
+def test_Refiner(testdata, refinerdata_testdata):
+
+    experiment = testdata.experiment
+    data = refinerdata_testdata
+
+    sigma_d = 0.02 ** 2
+    S1 = Simple1ProfileModel.from_sigma_d(sigma_d).parameterisation()
+    S6 = Simple6ProfileModel.from_sigma_d(sigma_d).parameterisation()
+
+    def check(
+        parameterisation,
+        fix_mosaic_spread=True,
+        fix_orientation=True,
+        fix_unit_cell=True,
+        fix_wavelength_spread=True,
+    ):
+
+        state = ModelState(
+            experiment,
+            parameterisation,
+            fix_mosaic_spread=fix_mosaic_spread,
+            fix_orientation=fix_orientation,
+            fix_unit_cell=fix_unit_cell,
+            fix_wavelength_spread=fix_wavelength_spread,
+        )
+
+        refiner = Refiner(state, data)
+        refiner.refine()
+
+        # print(state.get_unit_cell().parameters())
+        print(state.get_M())
+
+    check(S1, fix_mosaic_spread=False, fix_orientation=True, fix_unit_cell=True)
+    check(S1, fix_mosaic_spread=True, fix_orientation=False, fix_unit_cell=True)
+    check(S1, fix_mosaic_spread=True, fix_orientation=True, fix_unit_cell=False)
+    check(S1, fix_mosaic_spread=False, fix_orientation=False, fix_unit_cell=True)
+    check(S1, fix_mosaic_spread=True, fix_orientation=False, fix_unit_cell=False)
+    check(S1, fix_mosaic_spread=False, fix_orientation=False, fix_unit_cell=False)
+
+    check(S6, fix_mosaic_spread=False, fix_orientation=True, fix_unit_cell=True)
+    check(S6, fix_mosaic_spread=True, fix_orientation=False, fix_unit_cell=True)
+    check(S6, fix_mosaic_spread=True, fix_orientation=True, fix_unit_cell=False)
+    check(S6, fix_mosaic_spread=False, fix_orientation=False, fix_unit_cell=True)
+    check(S6, fix_mosaic_spread=True, fix_orientation=False, fix_unit_cell=False)
+    check(S6, fix_mosaic_spread=False, fix_orientation=False, fix_unit_cell=False)
 
 
 def test_RefinerData(testdata):
