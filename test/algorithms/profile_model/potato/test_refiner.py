@@ -2,6 +2,7 @@ from __future__ import division
 from __future__ import print_function
 from collections import namedtuple
 from os.path import join
+from math import exp
 from random import uniform, randint
 import pytest
 from dxtbx.model.experiment_list import ExperimentListFactory
@@ -14,9 +15,9 @@ from dials.algorithms.refinement.parameterisation.crystal_parameters import (
 from dials.algorithms.profile_model.potato.parameterisation import (
     Simple1MosaicityParameterisation,
     Simple6MosaicityParameterisation,
-    Angular2MosaicityParameterisation,
-    Angular4MosaicityParameterisation,
-    WavelengthSpreadParameterisation,
+    # Angular2MosaicityParameterisation,
+    # Angular4MosaicityParameterisation,
+    # WavelengthSpreadParameterisation,
     ModelState,
     ReflectionModelState,
 )
@@ -28,12 +29,15 @@ from dials.algorithms.profile_model.potato.refiner import (
     rotate_vec3_double,
     rotate_mat3_double,
     ReflectionLikelihood,
+    RefinerData,
 )
+
 
 def first_derivative(func, x, h):
     return (-func(x + 2 * h) + 8 * func(x + h) - 8 * func(x - h) + func(x - 2 * h)) / (
         12 * h
     )
+
 
 def generate_data(experiments, reflections):
 
@@ -58,7 +62,7 @@ def generate_data(experiments, reflections):
         s2 + matrix.col((uniform(0, 1e-3), uniform(0, 1e-3), uniform(0, 1e-3)))
     ).normalize() * s0.length()
     mobs = matrix.col((uniform(0, 1e-3), uniform(0, 1e-3)))
-    sp = s2.normalize()*s0.length()
+    sp = s2.normalize() * s0.length()
 
     b1, b2, b3, b4, b5, b6 = (
         uniform(1e-3, 3e-3),
@@ -80,11 +84,23 @@ def generate_data(experiments, reflections):
 
     return params, s0, sp, h, ctot, mobs, Sobs
 
+
 @pytest.fixture
 def testdata(dials_regression):
 
     TestData = namedtuple(
-        "TestData", ["experiment", "models", "s0", "sp", "h", "ctot", "mobs", "Sobs"]
+        "TestData",
+        [
+            "experiment",
+            "reflections",
+            "models",
+            "s0",
+            "sp",
+            "h",
+            "ctot",
+            "mobs",
+            "Sobs",
+        ],
     )
 
     experiments = ExperimentListFactory.from_json_file(
@@ -97,6 +113,7 @@ def testdata(dials_regression):
 
     return TestData(
         experiment=experiments[0],
+        reflections=reflections,
         models=models,
         s0=s0,
         sp=sp,
@@ -105,6 +122,7 @@ def testdata(dials_regression):
         mobs=mobs,
         Sobs=Sobs,
     )
+
 
 def test_ConditionalDistribution(testdata):
     def check(
@@ -120,9 +138,9 @@ def test_ConditionalDistribution(testdata):
         s0 = testdata.s0
         sp = testdata.sp
         h = testdata.h
-        ctot = testdata.ctot
-        mobs = testdata.mobs
-        Sobs = testdata.Sobs
+        # ctot = testdata.ctot
+        # mobs = testdata.mobs
+        # Sobs = testdata.Sobs
 
         U_params = models[1].get_param_vals()
         B_params = models[2].get_param_vals()
@@ -144,7 +162,7 @@ def test_ConditionalDistribution(testdata):
         state.set_L_params(L_params)
 
         model = ReflectionModelState(state, s0, h)
-       
+
         def get_conditional(model):
             # Compute the change of basis
             R = compute_change_of_basis_operation(s0, sp)
@@ -166,20 +184,18 @@ def test_ConditionalDistribution(testdata):
             dmu = rotate_vec3_double(R, model.get_dr_dp())
 
             # Construct the conditional distribution
-            conditional = ConditionalDistribution(
-                s0, mu, dmu, S, dS
-            )
+            conditional = ConditionalDistribution(s0, mu, dmu, S, dS)
             return conditional
 
         conditional = get_conditional(model)
-            
+
         step = 1e-6
 
         dm_dp = conditional.first_derivatives_of_mean()
         dS_dp = conditional.first_derivatives_of_sigma()
 
         parameters = state.get_active_parameters()
-        
+
         def compute_sigma(parameters):
             state.set_active_parameters(parameters)
             model = ReflectionModelState(state, s0, h)
@@ -231,6 +247,7 @@ def test_ConditionalDistribution(testdata):
     check(S6, None, fix_wavelength_spread=True, fix_unit_cell=True)
     check(S6, None, fix_wavelength_spread=True, fix_orientation=True)
 
+
 def test_rotate_vec3_double():
 
     vectors = flex.vec3_double([matrix.col((1, 1, 1)).normalize()])
@@ -257,7 +274,6 @@ def test_rotate_mat3_double():
 
 
 def test_ReflectionLikelihood(testdata):
-    
     def check(
         mosaicity_parameterisation,
         wavelength_parameterisation,
@@ -295,24 +311,18 @@ def test_ReflectionLikelihood(testdata):
         state.set_L_params(L_params)
 
         def get_reflection_likelihood(state):
-            return ReflectionLikelihood(
-                state,
-                s0,
-                sp,
-                h,
-                ctot,
-                mobs,
-                Sobs)
+            return ReflectionLikelihood(state, s0, sp, h, ctot, mobs, Sobs)
 
         likelihood = get_reflection_likelihood(state)
-            
+
         step = 1e-6
 
         dL_dp = likelihood.first_derivatives()
 
         parameters = state.get_active_parameters()
-        
+
         assert len(dL_dp) == len(parameters)
+
         def compute_likelihood(parameters):
             state.set_active_parameters(parameters)
             likelihood = get_reflection_likelihood(state)
@@ -346,11 +356,64 @@ def test_ReflectionLikelihood(testdata):
     check(S6, None, fix_wavelength_spread=True, fix_orientation=True)
 
 
-
-
 def test_Refiner():
     pass
 
 
-def test_RefinerData():
-    pass
+def test_RefinerData(testdata):
+
+    experiment = testdata.experiment
+    reflections = testdata.reflections
+
+    panel = experiment.detector[0]
+    s0_length = matrix.col(experiment.beam.get_s0()).length()
+    reflections["bbox"] = flex.int6(len(reflections))
+    reflections["xyzobs.px.value"] = flex.vec3_double(len(reflections))
+    reflections["s2"] = reflections["s1"].each_normalize() * s0_length
+    reflections["sp"] = flex.vec3_double(len(reflections))
+    for i, (x, y, z) in enumerate(reflections["xyzcal.px"]):
+        x0 = int(x) - 5
+        x1 = int(x) + 5 + 1
+        y0 = int(y) - 5
+        y1 = int(y) + 5 + 1
+        z0 = int(z)
+        z1 = z0 + 1
+        reflections["bbox"][i] = x0, x1, y0, y1, z0, z1
+        reflections["xyzobs.px.value"][i] = (int(x) + 0.5, int(y) + 0.5, int(z) + 0.5)
+        reflections["sp"][i] = (
+            matrix.col(
+                panel.get_pixel_lab_coord(reflections["xyzobs.px.value"][i][0:2])
+            ).normalize()
+            * s0_length
+        )
+
+    reflections["shoebox"] = flex.shoebox(
+        reflections["panel"], reflections["bbox"], allocate=True
+    )
+
+    shoebox_data = flex.float(flex.grid(1, 11, 11))
+    shoebox_mask = flex.int(flex.grid(1, 11, 11))
+    for j in range(11):
+        for i in range(11):
+            shoebox_data[0, j, i] = (
+                100
+                * exp(-0.5 * (j - 5) ** 2 / 1 ** 2)
+                * exp(-0.5 * (i - 5) ** 2 / 1 ** 2)
+            )
+            shoebox_mask[0, j, i] = 5
+    for sbox in reflections["shoebox"]:
+        sbox.data = shoebox_data
+        sbox.mask = shoebox_mask
+
+    data = RefinerData.from_reflections(experiment, reflections)
+
+    assert tuple(data.s0) == pytest.approx(experiment.beam.get_s0())
+    assert data.h_list == reflections["miller_index"]
+    for a, b in zip(data.sp_list, reflections["sp"]):
+        assert a == pytest.approx(b)
+    assert data.ctot_list == sum(shoebox_data)
+    mobs1, mobs2 = data.mobs_list.parts()
+    mobs1 = flex.abs(mobs1)
+    mobs2 = flex.abs(mobs2)
+    assert max(mobs1) < 1e-6
+    assert max(mobs2) < 1e-6
