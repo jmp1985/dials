@@ -5,7 +5,6 @@ from __future__ import absolute_import, division, print_function
 import logging
 from math import log, exp
 from dials.array_family import flex
-from dials.util import Sorry
 from scitbx import sparse
 from libtbx.table_utils import simple_table
 
@@ -17,7 +16,7 @@ def get_error_model(error_model_type):
     if error_model_type == "basic":
         return BasicErrorModel
     else:
-        raise Sorry("Invalid choice of error model.")
+        raise ValueError("Invalid choice of error model: %s" % error_model_type)
 
 
 class BasicErrorModel(object):
@@ -48,6 +47,7 @@ class BasicErrorModel(object):
     def __str__(self):
         a = abs(self.refined_parameters[0])
         b = abs(self.refined_parameters[1])
+        ISa = "%.3f" % (1.0 / (b * a)) if (b * a) > 0 else "Unable to estimate"
         return "\n".join(
             (
                 "",
@@ -63,7 +63,7 @@ class BasicErrorModel(object):
                 + "("
                 + u"\u03C3\xb2"
                 " + (bI)" + u"\xb2" + ")",
-                "  estimated I/sigma asymptotic limit: %.3f" % (1.0 / (b * a)),
+                "  estimated I/sigma asymptotic limit: %s" % ISa,
                 "",
             )
         )

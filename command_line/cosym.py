@@ -3,14 +3,15 @@ from __future__ import absolute_import, division, print_function
 # LIBTBX_PRE_DISPATCHER_INCLUDE_SH export BOOST_ADAPTBX_FPE_DEFAULT=1
 
 import logging
+import sys
 
 logger = logging.getLogger("dials.command_line.cosym")
 
 import iotbx.phil
-from cctbx import crystal, miller
 from cctbx import sgtbx
 from dxtbx.serialize import dump
 from dials.array_family import flex
+from dials.util import show_mail_on_error, Sorry
 from dials.util.options import flatten_experiments, flatten_reflections
 from dials.util.multi_dataset_handling import (
     assign_unique_identifiers,
@@ -18,6 +19,7 @@ from dials.util.multi_dataset_handling import (
     select_datasets_on_ids,
 )
 from dials.util.observer import Subject
+from dials.util.filter_reflections import filtered_arrays_from_experiments_reflections
 from dials.algorithms.symmetry.cosym.observers import register_default_cosym_observers
 from dials.algorithms.symmetry.cosym import CosymAnalysis
 
@@ -49,9 +51,9 @@ output {
     .type = str
   debug_log = dials.cosym.debug.log
     .type = str
-  experiments = "reindexed_experiments.json"
+  experiments = "symmetrized.expt"
     .type = path
-  reflections = "reindexed_reflections.pickle"
+  reflections = "symmetrized.refl"
     .type = path
   json = dials.cosym.json
     .type = path
@@ -59,7 +61,7 @@ output {
     .type = path
 }
 
-verbosity = 1
+verbosity = 0
   .type = int(value_min=0)
   .help = "The verbosity level"
 """,
@@ -99,8 +101,11 @@ class cosym(Subject):
         )
 
         # transform models into miller arrays
-        datasets = self._miller_arrays_from_experiments_reflections(
-            self._experiments, self._reflections
+        datasets = filtered_arrays_from_experiments_reflections(
+            self.experiments,
+            self.reflections,
+            outlier_rejection_after_filter=False,
+            partiality_threshold=params.partiality_threshold,
         )
 
         self.cosym_analysis = CosymAnalysis(datasets, self.params)
@@ -121,7 +126,7 @@ class cosym(Subject):
 
         space_groups = {}
         reindexing_ops = {}
-        for dataset_id in self.cosym_analysis.reindexing_ops.iterkeys():
+        for dataset_id in self.cosym_analysis.reindexing_ops:
             if 0 in self.cosym_analysis.reindexing_ops[dataset_id]:
                 cb_op = self.cosym_analysis.reindexing_ops[dataset_id][0]
                 reindexing_ops.setdefault(cb_op, [])
@@ -135,21 +140,18 @@ class cosym(Subject):
                 )
 
         logger.info("Space groups:")
-        for sg, datasets in space_groups.iteritems():
+        for sg, datasets in space_groups.items():
             logger.info(str(sg.info().reference_setting()))
             logger.info(datasets)
 
         logger.info("Reindexing operators:")
-        for cb_op, datasets in reindexing_ops.iteritems():
+        for cb_op, datasets in reindexing_ops.items():
             logger.info(cb_op)
             logger.info(datasets)
 
-        if self.cosym_analysis.best_solution is not None:
-            subgroup = self.cosym_analysis.best_solution.subgroup
-        else:
-            subgroup = None
-
-        self._apply_reindexing_operators(reindexing_ops, subgroup=subgroup)
+        self._apply_reindexing_operators(
+            reindexing_ops, subgroup=self.cosym_analysis.best_subgroup
+        )
 
     def export(self):
         """Output the datafiles for cosym.
@@ -161,8 +163,6 @@ class cosym(Subject):
             reindexed_reflections.extend(refl)
         reindexed_reflections.reset_ids()
 
-        if self.params.output.json is not None:
-            self.cosym_analysis.as_json(filename=self.params.output.json)
         logger.info(
             "Saving reindexed experiments to %s", self.params.output.experiments
         )
@@ -174,7 +174,7 @@ class cosym(Subject):
 
     def _apply_reindexing_operators(self, reindexing_ops, subgroup=None):
         """Apply the reindexing operators to the reflections and experiments."""
-        for cb_op, dataset_ids in reindexing_ops.iteritems():
+        for cb_op, dataset_ids in reindexing_ops.items():
             cb_op = sgtbx.change_of_basis_op(cb_op)
             if subgroup is not None:
                 cb_op = subgroup["cb_op_inp_best"] * cb_op
@@ -188,62 +188,12 @@ class cosym(Subject):
                         .space_group()
                         .build_derived_acentric_group()
                     )
+                expt.crystal.set_unit_cell(
+                    expt.crystal.get_space_group().average_unit_cell(
+                        expt.crystal.get_unit_cell()
+                    )
+                )
                 refl["miller_index"] = cb_op.apply(refl["miller_index"])
-
-    def _miller_arrays_from_experiments_reflections(self, experiments, reflections):
-        miller_arrays = []
-
-        for expt, refl in zip(experiments, reflections):
-            crystal_symmetry = crystal.symmetry(
-                unit_cell=expt.crystal.get_unit_cell(),
-                space_group=expt.crystal.get_space_group(),
-            )
-
-            from dials.util.filter_reflections import filter_reflection_table
-
-            if "intensity.scale.value" in refl:
-                intensity_choice = ["scale"]
-                intensity_to_use = "scale"
-            else:
-                assert "intensity.sum.value" in refl
-                intensity_choice = ["sum"]
-                if "intensity.prf.value" in refl:
-                    intensity_choice.append("profile")
-                    intensity_to_use = "prf"
-                else:
-                    intensity_to_use = "sum"
-
-            refl = filter_reflection_table(
-                refl,
-                intensity_choice,
-                min_isigi=-5,
-                filter_ice_rings=False,
-                combine_partials=True,
-                partiality_threshold=self.params.partiality_threshold,
-            )
-            assert refl.size() > 0
-            try:
-                data = refl["intensity." + intensity_to_use + ".value"]
-                variances = refl["intensity." + intensity_to_use + ".variance"]
-            except RuntimeError:
-                data = refl["intensity.sum.value"]
-                variances = refl["intensity.sum.variance"]
-
-            miller_indices = refl["miller_index"]
-            assert variances.all_gt(0)
-            sigmas = flex.sqrt(variances)
-
-            miller_set = miller.set(
-                crystal_symmetry, miller_indices, anomalous_flag=False
-            )
-            intensities = miller.array(miller_set, data=data, sigmas=sigmas)
-            intensities.set_observation_type_xray_intensity()
-            intensities.set_info(
-                miller.array_info(source="DIALS", source_type="pickle")
-            )
-            miller_arrays.append(intensities)
-
-        return miller_arrays
 
     def _map_to_primitive(self, experiments, reflections):
         identifiers = []
@@ -262,20 +212,6 @@ class cosym(Subject):
                 refl = refl.select(~sel)
             refl["miller_index"] = cb_op_to_primitive.apply(refl["miller_index"])
             expt.crystal = expt.crystal.change_basis(cb_op_to_primitive)
-
-            if self.params.space_group is not None:
-                space_group_info = self.params.space_group.primitive_setting()
-                if not space_group_info.group().is_compatible_unit_cell(
-                    expt.crystal.get_unit_cell()
-                ):
-                    logger.info(
-                        "Skipping data set - incompatible space group and unit cell: %s, %s",
-                        space_group_info,
-                        expt.crystal.get_unit_cell(),
-                    )
-                    continue
-            else:
-                expt.crystal.set_space_group(sgtbx.space_group())
             identifiers.append(expt.identifier)
 
         return select_datasets_on_ids(
@@ -290,19 +226,8 @@ class cosym(Subject):
         )
         for expt, refl in zip(experiments, reflections):
             expt.crystal = expt.crystal.change_basis(cb_op_ref_min)
+            expt.crystal.set_space_group(sgtbx.space_group())
             refl["miller_index"] = cb_op_ref_min.apply(refl["miller_index"])
-
-            if self.params.space_group is not None:
-                expt.crystal.set_space_group(
-                    self.params.space_group.primitive_setting().group()
-                )
-                expt.crystal.set_unit_cell(
-                    expt.crystal.get_space_group().average_unit_cell(
-                        expt.crystal.get_unit_cell()
-                    )
-                )
-            else:
-                expt.crystal.set_space_group(sgtbx.space_group())
         return experiments, reflections
 
     @Subject.notify_event("performed_unit_cell_clustering")
@@ -346,18 +271,18 @@ the presence of an indexing ambiguity.
 
 The program takes as input a set of integrated experiments and reflections,
 either in one file per experiment, or with all experiments combined in a single
-experiments.json and reflections.pickle file. It will perform analysis of the
+models.expt and observations.refl file. It will perform analysis of the
 symmetry elements present in the datasets and, if necessary, reindex experiments
 and reflections as necessary to ensure that all output experiments and
 reflections are indexed consistently.
 
 Examples::
 
-  dials.cosym experiments.json reflections.pickle
+  dials.cosym models.expt observations.refl
 
-  dials.cosym experiments.json reflections.pickle space_group=I23
+  dials.cosym models.expt observations.refl space_group=I23
 
-  dials.cosym experiments.json reflections.pickle space_group=I23 lattice_group=I23
+  dials.cosym models.expt observations.refl space_group=I23 lattice_group=I23
 
 """
 
@@ -366,7 +291,7 @@ def run(args):
     from dials.util import log
     from dials.util.options import OptionParser
 
-    usage = "dials.cosym [options] experiments.json reflections.pickle"
+    usage = "dials.cosym [options] models.expt observations.refl"
 
     parser = OptionParser(
         usage=usage,
@@ -390,7 +315,7 @@ def run(args):
 
     # Log the diff phil
     diff_phil = parser.diff_phil.as_str()
-    if diff_phil is not "":
+    if diff_phil != "":
         logger.info("The following parameters have been modified:\n")
         logger.info(diff_phil)
 
@@ -406,19 +331,27 @@ def run(args):
 
     experiments = flatten_experiments(params.input.experiments)
     reflections = flatten_reflections(params.input.reflections)
-    reflections = parse_multiple_datasets(reflections)
-    experiments, reflections = assign_unique_identifiers(experiments, reflections)
 
-    cosym_instance = cosym(
-        experiments=experiments, reflections=reflections, params=params
-    )
-    if params.output.html:
+    reflections = parse_multiple_datasets(reflections)
+    if len(experiments) != len(reflections):
+        raise Sorry(
+            "Mismatched number of experiments and reflection tables found: %s & %s."
+            % (len(experiments), len(reflections))
+        )
+    try:
+        experiments, reflections = assign_unique_identifiers(experiments, reflections)
+        cosym_instance = cosym(
+            experiments=experiments, reflections=reflections, params=params
+        )
+    except ValueError as e:
+        raise Sorry(e)
+
+    if params.output.html or params.output.json:
         register_default_cosym_observers(cosym_instance)
     cosym_instance.run()
     cosym_instance.export()
 
 
 if __name__ == "__main__":
-    import sys
-
-    run(sys.argv[1:])
+    with show_mail_on_error():
+        run(sys.argv[1:])

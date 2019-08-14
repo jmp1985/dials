@@ -3,8 +3,13 @@
 
 from __future__ import absolute_import, division, print_function
 
+import sys
+
+import libtbx.load_env
 import iotbx.phil
-from cctbx import sgtbx
+from dials.util import Sorry
+from dials.util.options import OptionParser
+from dials.util.options import flatten_experiments
 
 help_message = """
 """
@@ -28,12 +33,7 @@ plot {
 
 
 def run(args):
-
-    from dials.util.options import OptionParser
-    from dials.util.options import flatten_experiments
-    import libtbx.load_env
-
-    usage = "%s [options] experiments.json" % (libtbx.env.dispatcher_name)
+    usage = "%s [options] models.expt" % (libtbx.env.dispatcher_name)
 
     parser = OptionParser(
         usage=usage,
@@ -80,12 +80,10 @@ def run(args):
 def do_cluster_analysis(crystal_symmetries, params):
 
     try:
-        import xfel
+        from xfel.clustering.cluster import Cluster
+        from xfel.clustering.cluster_groups import unit_cell_info
     except ImportError:
         raise Sorry("cluster_unit_cell requires xfel module but is not available")
-
-    from xfel.clustering.cluster import Cluster
-    from xfel.clustering.cluster_groups import unit_cell_info
 
     ucs = Cluster.from_crystal_symmetries(crystal_symmetries)
 
@@ -128,6 +126,4 @@ def do_cluster_analysis(crystal_symmetries, params):
 
 
 if __name__ == "__main__":
-    import sys
-
     run(sys.argv[1:])

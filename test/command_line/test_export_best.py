@@ -12,43 +12,32 @@ def test_export_best(dials_data, tmpdir):
         ],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
     result = procrunner.run(
-        ["dials.find_spots", "imported_experiments.json"],
+        ["dials.find_spots", "imported.expt"], working_directory=tmpdir.strpath
+    )
+    assert not result.returncode and not result.stderr
+    result = procrunner.run(
+        ["dials.index", "imported.expt", "strong.refl", "space_group=P422"],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
-    result = procrunner.run(
-        [
-            "dials.index",
-            "imported_experiments.json",
-            "strong.pickle",
-            "space_group=P422",
-        ],
-        working_directory=tmpdir.strpath,
-    )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
     result = procrunner.run(
         [
             "dials.integrate",
-            "indexed_experiments.json",
-            "indexed.pickle",
+            "indexed.expt",
+            "indexed.refl",
             "prediction.padding=0",
             "sigma_m_algorithm=basic",
         ],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
     result = procrunner.run(
-        [
-            "dials.export",
-            "integrated_experiments.json",
-            "integrated.pickle",
-            "format=best",
-        ],
+        ["dials.export", "integrated.expt", "integrated.refl", "format=best"],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
 
     assert tmpdir.join("best.dat").check()
     assert tmpdir.join("best.hkl").check()
@@ -59,16 +48,16 @@ def test_export_best(dials_data, tmpdir):
     assert (
         lines
         == """\
-  183.7743       0.77       1.60
-   63.4130       1.57       1.80
-   38.3180       1.87       1.71
-   27.4540       1.84       1.55
-   21.3900       1.89       1.51
-   17.5206       1.89       1.52
-   14.8370       1.89       1.45
-   12.8665       1.90       1.45
-   11.3584       1.89       1.42
-   10.1669       1.87       1.46
+  183.7552       0.77       1.60
+   63.4094       1.57       1.80
+   38.3162       1.87       1.71
+   27.4528       1.84       1.55
+   21.3892       1.89       1.51
+   17.5199       1.89       1.52
+   14.8364       1.89       1.45
+   12.8661       1.90       1.45
+   11.3580       1.89       1.42
+   10.1665       1.87       1.46
 """
     )
 
@@ -77,16 +66,16 @@ def test_export_best(dials_data, tmpdir):
     assert (
         lines
         == """\
- -20   27   -8      15.92      17.13
- -20   27   -7      64.30      18.73
- -20   27   -6       2.79      16.43
- -20   27   -5      -0.50      16.63
- -20   28  -10      24.24      16.00
- -20   28   -9      46.90      17.03
- -20   28   -7      44.90      18.04
- -20   28   -6      28.86      16.41
- -20   28   -4     -13.18      16.65
- -20   28   -2       7.26      16.54
+ -36   -4   17       3.93      13.67
+ -36   -4   18     -10.54      13.65
+ -36   -3   16      18.34      16.24
+ -36   -2   15      -1.53      16.57
+ -36   -1   13     -14.19      17.01
+ -36    0   11     -22.41      16.27
+ -36    0   12      -2.57      14.54
+ -36    1    9      25.03      16.88
+ -36    1   10      -8.71      15.93
+ -35   -4   18      29.57      17.44
 """
     )
 
@@ -100,22 +89,22 @@ DETECTOR       PILA
 SITE           Not set
 DIAMETER       434.64
 PIXEL          0.172
-ROTAXIS        -0.01 0.00 1.00 FAST
+ROTAXIS        -0.00 0.00 1.00 FAST
 POLAXIS        0.00 1.00 0.00
 GAIN               1.00
 CMOSAIC            0.54
 PHISTART           0.00
 PHIWIDTH           0.20
-DISTANCE         191.01
+DISTANCE         190.99
 WAVELENGTH      0.97950
 POLARISATION    0.99900
 SYMMETRY       P422
-UB             -0.012247 -0.020072  0.003156
-               -0.004952 -0.000405 -0.024640
-                0.019676 -0.012595 -0.004237
-CELL              42.20    42.20    39.68  90.00  90.00  90.00
+UB              0.012248  0.020072  0.003156
+                0.005026  0.000358 -0.024626
+               -0.019659  0.012598 -0.004329
+CELL              42.19    42.19    39.68  90.00  90.00  90.00
 RASTER           7 7 5 3 3
-SEPARATION      0.546  0.546
+SEPARATION      0.545  0.545
 BEAM            219.865  212.610
 # end of parameter file for BEST
 """

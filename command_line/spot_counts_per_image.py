@@ -4,15 +4,10 @@ from __future__ import absolute_import, division, print_function
 
 import sys
 
-from dials.util.options import OptionParser
-from dials.util.options import (
-    flatten_reflections,
-    flatten_experiments,
-    flatten_experiments,
-)
-from dials.algorithms.spot_finding import per_image_analysis
-
 import iotbx.phil
+from dials.util.options import OptionParser
+from dials.util.options import flatten_reflections, flatten_experiments
+from dials.algorithms.spot_finding import per_image_analysis
 
 help_message = """
 
@@ -22,9 +17,9 @@ generates a plot of the per-image statistics (plot=image.png).
 
 Examples::
 
-  dials.spot_counts_per_image experiments.json strong.pickle
+  dials.spot_counts_per_image imported.expt strong.refl
 
-  dials.spot_counts_per_image experiments.json strong.pickle plot=per_image.png
+  dials.spot_counts_per_image imported.expt strong.refl plot=per_image.png
 
 """
 
@@ -49,9 +44,7 @@ id = None
 
 
 def run(args):
-    import libtbx.load_env
-
-    usage = "%s [options] experiments.json strong.pickle" % libtbx.env.dispatcher_name
+    usage = "dials.spot_counts_per_image [options] imported.expt strong.refl"
 
     parser = OptionParser(
         usage=usage,
@@ -143,6 +136,9 @@ def run(args):
             with open(params.json, "wb") as fp:
                 json.dump(stats.__dict__, fp)
     if params.plot:
+        import matplotlib
+
+        matplotlib.use("Agg")
         per_image_analysis.plot_stats(stats, filename=params.plot)
 
 

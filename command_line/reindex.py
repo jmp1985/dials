@@ -26,32 +26,32 @@ from dxtbx.serialize import dump
 from dials.array_family import flex
 from dials.util.options import OptionParser
 from dials.util.options import flatten_reflections, flatten_experiments
-from dials.util.filter_reflections import integrated_data_to_filtered_miller_array
+from dials.util.filter_reflections import filtered_arrays_from_experiments_reflections
 
 help_message = """
 
-This program can be used to re-index an experiments.json and/or indexed.pickle
+This program can be used to re-index an indexed.expt and/or indexed.refl
 file from one setting to another. The change of basis operator can be
 provided in h,k,l, or a,b,c or x,y,z conventions. By default the change of
-basis operator will also be applied to the space group in the experiments.json
+basis operator will also be applied to the space group in the indexed.expt
 file, however, optionally, a space group (including setting) to be applied
 AFTER applying the change of basis operator can be provided.
 Alternatively, to reindex an integated dataset in the case of indexing abiguity,
-a reference dataset (experiments.json and reflection.pickle) in the same space
+a reference dataset (models.expt and reflection.refl) in the same space
 group can be specified. In this case, any potential twin operators are tested,
 and the dataset is reindexed to the setting that gives the highest correlation
 with the reference dataset.
 
 Examples::
 
-  dials.reindex experiments.json change_of_basis_op=b+c,a+c,a+b
+  dials.reindex indexed.expt change_of_basis_op=b+c,a+c,a+b
 
-  dials.reindex indexed.pickle change_of_basis_op=-b,a+b+2*c,-a
+  dials.reindex indexed.refl change_of_basis_op=-b,a+b+2*c,-a
 
-  dials.reindex experiments.json index.pickle change_of_basis_op=l,h,k
+  dials.reindex indexed.expt indexed.refl change_of_basis_op=l,h,k
 
-  dials.reindex experiments.json index.pickle reference.experiments=ref_experiments.json
-    reference.reflections=ref_reflections.pickle
+  dials.reindex indexed.expt indexed.refl reference.experiments=reference.expt
+    reference.reflections=reference.refl
 
 """
 
@@ -74,11 +74,11 @@ reference {
     .help = "Reference reflections to allow reindexing to consistent index between datasets."
 }
 output {
-  experiments = reindexed_experiments.json
+  experiments = reindexed.expt
     .type = str
     .help = "The filename for reindexed experimental models"
 
-  reflections = reindexed_reflections.pickle
+  reflections = reindexed.refl
     .type = str
     .help = "The filename for reindexed reflections"
 }
@@ -138,7 +138,7 @@ def run(args):
     import libtbx.load_env
     from dials.util import Sorry
 
-    usage = "%s [options] experiments.json indexed.pickle" % libtbx.env.dispatcher_name
+    usage = "dials.reindex [options] indexed.expt indexed.refl"
 
     parser = OptionParser(
         usage=usage,
@@ -186,12 +186,11 @@ experiments file must also be specified with the option: reference= """
             params.reference.reflections
         )
 
-        test_crystal = experiments.crystals()[0]
         test_reflections = reflections[0]
 
         if (
             reference_crystal.get_space_group().type().number()
-            != test_crystal.get_space_group().type().number()
+            != experiments.crystals()[0].get_space_group().type().number()
         ):
             raise Sorry("Space group of input does not match reference")
 
@@ -225,12 +224,18 @@ experiments file must also be specified with the option: reference= """
             )
 
         # Make miller array of the two datasets
-        test_miller_set = integrated_data_to_filtered_miller_array(
-            test_reflections, test_crystal
-        )
-        reference_miller_set = integrated_data_to_filtered_miller_array(
-            reference_reflections, reference_crystal
-        )
+        try:
+            test_miller_set = filtered_arrays_from_experiments_reflections(
+                experiments, [test_reflections]
+            )[0]
+        except ValueError:
+            raise Sorry("No reflections remain after filtering the test dataset")
+        try:
+            reference_miller_set = filtered_arrays_from_experiments_reflections(
+                reference_experiments, [reference_reflections]
+            )[0]
+        except ValueError:
+            raise Sorry("No reflections remain after filtering the reference dataset")
 
         from dials.algorithms.symmetry.reindex_to_reference import (
             determine_reindex_operator_against_reference,
@@ -301,9 +306,14 @@ experiments file must also be specified with the option: reference= """
             cryst_reindexed = cryst_orig.change_basis(change_of_basis_op)
             if params.space_group is not None:
                 a, b, c = cryst_reindexed.get_real_space_vectors()
+                A_varying = [
+                    cryst_reindexed.get_A_at_scan_point(i)
+                    for i in range(cryst_reindexed.num_scan_points)
+                ]
                 cryst_reindexed = Crystal(
                     a, b, c, space_group=params.space_group.group()
                 )
+                cryst_reindexed.set_A_at_scan_points(A_varying)
             crystal.update(cryst_reindexed)
 
             print("Old crystal:")

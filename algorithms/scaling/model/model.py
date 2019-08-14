@@ -10,7 +10,6 @@ import abc
 import logging
 from collections import OrderedDict
 
-import numpy as np
 from dials.array_family import flex
 from dials.algorithms.scaling.model.components.scale_components import (
     SingleScaleFactor,
@@ -99,7 +98,7 @@ class ScalingModelBase(object):
     @property
     def n_params(self):
         """:obj:`dict`: a dictionary of the model components."""
-        return sum([c.parameters.size() for c in self._components.itervalues()])
+        return sum(c.parameters.size() for c in self._components.values())
 
     @abc.abstractproperty
     def consecutive_refinement_order(self):
@@ -119,27 +118,23 @@ class ScalingModelBase(object):
 
         """
         dictionary = OrderedDict({"__id__": self.id_})
-        dictionary.update({"is_scaled": self._is_scaled})
+        dictionary["is_scaled"] = self._is_scaled
         for key in self.components:
-            dictionary.update(
-                {
-                    key: OrderedDict(
-                        [
-                            ("n_parameters", self._components[key].n_params),
-                            ("parameters", list(self._components[key].parameters)),
-                            (
-                                "null_parameter_value",
-                                self._components[key].null_parameter_value,
-                            ),
-                        ]
-                    )
-                }
+            dictionary[key] = OrderedDict(
+                [
+                    ("n_parameters", self._components[key].n_params),
+                    ("parameters", list(self._components[key].parameters)),
+                    (
+                        "null_parameter_value",
+                        self._components[key].null_parameter_value,
+                    ),
+                ]
             )
             if self._components[key].parameter_esds:
-                dictionary[key].update(
-                    [("est_standard_devs", list(self._components[key].parameter_esds))]
+                dictionary[key]["est_standard_devs"] = list(
+                    self._components[key].parameter_esds
                 )
-        dictionary.update({"configuration_parameters": self._configdict})
+        dictionary["configuration_parameters"] = self._configdict
         return dictionary
 
     @classmethod
@@ -159,7 +154,7 @@ class ScalingModelBase(object):
 
     def record_intensity_combination_Imid(self, Imid):
         """Record the intensity combination Imid value."""
-        self._configdict.update({"Imid": Imid})
+        self._configdict["Imid"] = Imid
 
     def show(self):
         """Print a representation of the scaling model."""
@@ -202,31 +197,18 @@ class PhysicalScalingModel(ScalingModelBase):
         super(PhysicalScalingModel, self).__init__(configdict, is_scaled)
         if "scale" in configdict["corrections"]:
             scale_setup = parameters_dict["scale"]
-            self._components.update(
-                {
-                    "scale": SmoothScaleComponent1D(
-                        scale_setup["parameters"], scale_setup["parameter_esds"]
-                    )
-                }
+            self._components["scale"] = SmoothScaleComponent1D(
+                scale_setup["parameters"], scale_setup["parameter_esds"]
             )
         if "decay" in configdict["corrections"]:
             decay_setup = parameters_dict["decay"]
-            self._components.update(
-                {
-                    "decay": SmoothBScaleComponent1D(
-                        decay_setup["parameters"], decay_setup["parameter_esds"]
-                    )
-                }
+            self._components["decay"] = SmoothBScaleComponent1D(
+                decay_setup["parameters"], decay_setup["parameter_esds"]
             )
         if "absorption" in configdict["corrections"]:
             absorption_setup = parameters_dict["absorption"]
-            self._components.update(
-                {
-                    "absorption": SHScaleComponent(
-                        absorption_setup["parameters"],
-                        absorption_setup["parameter_esds"],
-                    )
-                }
+            self._components["absorption"] = SHScaleComponent(
+                absorption_setup["parameters"], absorption_setup["parameter_esds"]
             )
 
     @property
@@ -304,7 +286,7 @@ class PhysicalScalingModel(ScalingModelBase):
         current_osc_range = conf["valid_osc_range"]
         # calculate one osc as don't have access to scan object here
         one_osc = (conf["valid_osc_range"][1] - conf["valid_osc_range"][0]) / (
-            (conf["valid_image_range"][1] - (conf["valid_image_range"][0] - 1))
+            conf["valid_image_range"][1] - (conf["valid_image_range"][0] - 1)
         )
         new_osc_range = (
             (new_image_range[0] - current_image_range[0]) * one_osc,
@@ -362,31 +344,13 @@ class PhysicalScalingModel(ScalingModelBase):
                 joined_inv_scales.extend(
                     self.components["scale"].calculate_scales(block_id=i)
                 )
-            sel = joined_norm_vals == min(joined_norm_vals)
-            initial_scale = joined_inv_scales.select(sel)[0]
-            self.components["scale"].parameters /= initial_scale
-            logger.info(
-                '\nThe "scale" model component has been rescaled, so that the\n'
-                "initial scale is 1.0."
-            )
-        if "decay" in self.components:
-            joined_d_vals = flex.double([])
-            joined_inv_scales = flex.double([])
-            for i in range(len(self.components["decay"].d_values)):
-                joined_d_vals.extend(self.components["decay"].d_values[i])
-                joined_inv_scales.extend(
-                    self.components["decay"].calculate_scales(block_id=i)
+            mean_scale = flex.mean(joined_inv_scales)
+            if mean_scale > 0.0:
+                self.components["scale"].parameters /= mean_scale
+                logger.info(
+                    '\nThe "scale" model component has been rescaled, so that the\n'
+                    "average scale is 1.0."
                 )
-            maxB = flex.max(
-                flex.double(np.log(joined_inv_scales)) * 2.0 * (joined_d_vals ** 2)
-            )
-            self.components["decay"].parameters -= flex.double(
-                self.components["decay"].n_params, maxB
-            )
-            logger.info(
-                'The "decay" model component has been rescaled, so that the\n'
-                "maximum B-factor applied to any reflection is 0.0."
-            )
 
     @classmethod
     def from_dict(cls, obj):
@@ -429,43 +393,28 @@ class ArrayScalingModel(ScalingModelBase):
         super(ArrayScalingModel, self).__init__(configdict, is_scaled)
         if "decay" in configdict["corrections"]:
             decay_setup = parameters_dict["decay"]
-            self._components.update(
-                {
-                    "decay": SmoothScaleComponent2D(
-                        decay_setup["parameters"],
-                        shape=(configdict["n_res_param"], configdict["n_time_param"]),
-                        parameter_esds=decay_setup["parameter_esds"],
-                    )
-                }
+            self._components["decay"] = SmoothScaleComponent2D(
+                decay_setup["parameters"],
+                shape=(configdict["n_res_param"], configdict["n_time_param"]),
+                parameter_esds=decay_setup["parameter_esds"],
             )
         if "absorption" in configdict["corrections"]:
             abs_setup = parameters_dict["absorption"]
-            self._components.update(
-                {
-                    "absorption": SmoothScaleComponent3D(
-                        abs_setup["parameters"],
-                        shape=(
-                            configdict["n_x_param"],
-                            configdict["n_y_param"],
-                            configdict["n_time_param"],
-                        ),
-                        parameter_esds=abs_setup["parameter_esds"],
-                    )
-                }
+            self._components["absorption"] = SmoothScaleComponent3D(
+                abs_setup["parameters"],
+                shape=(
+                    configdict["n_x_param"],
+                    configdict["n_y_param"],
+                    configdict["n_time_param"],
+                ),
+                parameter_esds=abs_setup["parameter_esds"],
             )
         if "modulation" in configdict["corrections"]:
             mod_setup = parameters_dict["modulation"]
-            self._components.update(
-                {
-                    "modulation": SmoothScaleComponent2D(
-                        mod_setup["parameters"],
-                        shape=(
-                            configdict["n_x_mod_param"],
-                            configdict["n_y_mod_param"],
-                        ),
-                        parameter_esds=mod_setup["parameter_esds"],
-                    )
-                }
+            self._components["modulation"] = SmoothScaleComponent2D(
+                mod_setup["parameters"],
+                shape=(configdict["n_x_mod_param"], configdict["n_y_mod_param"]),
+                parameter_esds=mod_setup["parameter_esds"],
             )
 
     @property
@@ -520,7 +469,7 @@ class ArrayScalingModel(ScalingModelBase):
         current_osc_range = conf["valid_osc_range"]
         # calculate one osc as don't have access to scan object here
         one_osc = (conf["valid_osc_range"][1] - conf["valid_osc_range"][0]) / (
-            (conf["valid_image_range"][1] - (conf["valid_image_range"][0] - 1))
+            conf["valid_image_range"][1] - (conf["valid_image_range"][0] - 1)
         )
         new_osc_range = (
             (new_image_range[0] - current_image_range[0]) * one_osc,
@@ -617,22 +566,14 @@ class KBScalingModel(ScalingModelBase):
         """Create the KB scaling model components."""
         super(KBScalingModel, self).__init__(configdict, is_scaled)
         if "scale" in configdict["corrections"]:
-            self._components.update(
-                {
-                    "scale": SingleScaleFactor(
-                        parameters_dict["scale"]["parameters"],
-                        parameters_dict["scale"]["parameter_esds"],
-                    )
-                }
+            self._components["scale"] = SingleScaleFactor(
+                parameters_dict["scale"]["parameters"],
+                parameters_dict["scale"]["parameter_esds"],
             )
         if "decay" in configdict["corrections"]:
-            self._components.update(
-                {
-                    "decay": SingleBScaleFactor(
-                        parameters_dict["decay"]["parameters"],
-                        parameters_dict["decay"]["parameter_esds"],
-                    )
-                }
+            self._components["decay"] = SingleBScaleFactor(
+                parameters_dict["decay"]["parameters"],
+                parameters_dict["decay"]["parameter_esds"],
             )
 
     def configure_components(self, reflection_table, experiment, params):

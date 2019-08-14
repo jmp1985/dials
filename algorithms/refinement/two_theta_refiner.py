@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 from dials.array_family import flex
 from scitbx import matrix
 from math import sqrt, pi
-
+from libtbx.table_utils import simple_table
+from scitbx.math import five_number_summary
 from dials.algorithms.refinement.reflection_manager import ReflectionManager
 from dials.algorithms.refinement.prediction.managed_predictors import (
     ExperimentsPredictor,
@@ -83,36 +84,30 @@ class TwoThetaReflectionManager(ReflectionManager):
 
         l = self.get_matches()
         nref = len(l)
-
-        from libtbx.table_utils import simple_table
-        from scitbx.math import five_number_summary
+        if nref == 0:
+            logger.warning(
+                "Unable to calculate summary statistics for zero observations"
+            )
+            return
 
         twotheta_resid = l["2theta_resid"]
         w_2theta = l["2theta.weights"]
 
         msg = (
-            "\nSummary statistics for {0} observations".format(nref)
+            "\nSummary statistics for {} observations".format(nref)
             + " matched to predictions:"
         )
         header = ["", "Min", "Q1", "Med", "Q3", "Max"]
         rows = []
-        try:
-            row_data = five_number_summary(twotheta_resid)
-            rows.append(
-                ["2theta_c - 2theta_o (deg)"]
-                + ["%.4g" % (e * RAD2DEG) for e in row_data]
-            )
-            row_data = five_number_summary(w_2theta)
-            rows.append(
-                ["2theta weights"] + ["%.4g" % (e * DEG2RAD ** 2) for e in row_data]
-            )
-            st = simple_table(rows, header)
-        except IndexError:
-            # zero length reflection list
-            logger.warning(
-                "Unable to calculate summary statistics for zero observations"
-            )
-            return
+        row_data = five_number_summary(twotheta_resid)
+        rows.append(
+            ["2theta_c - 2theta_o (deg)"] + ["%.4g" % (e * RAD2DEG) for e in row_data]
+        )
+        row_data = five_number_summary(w_2theta)
+        rows.append(
+            ["2theta weights"] + ["%.4g" % (e * DEG2RAD ** 2) for e in row_data]
+        )
+        st = simple_table(rows, header)
         logger.info(msg)
         logger.info(st.format())
         logger.info("")
@@ -186,22 +181,6 @@ class TwoThetaTarget(Target):
         self.update_matches(force=True)
 
         return
-
-    # XXXX FIXME In the base class this method is hardcoded to expect three
-    # types of residual: in X, Y, and Z. Better to make the base class behave
-    # with any number of types and remove this method
-    @staticmethod
-    def _build_jacobian(d2theta_dp, nelem=None, nparam=None):
-        """construct Jacobian from lists of gradient vectors. This method may be
-        overridden for the case where these vectors use sparse storage"""
-
-        jacobian = flex.double(flex.grid(nelem, nparam))
-        # loop over parameters
-        for i in range(nparam):
-            col = d2theta_dp[i]
-            jacobian.matrix_paste_column_in_place(col, i)
-
-        return jacobian
 
     @staticmethod
     def _extract_residuals_and_weights(matches):
@@ -317,7 +296,7 @@ class TwoThetaPredictionParameterisation(PredictionParameterisation):
                 # if no reflections are in this experiment, skip calculation of
                 # gradients, but must still process null gradients by a callback
                 if callback is not None:
-                    for iparam in xrange(xlucp.num_free()):
+                    for iparam in range(xlucp.num_free()):
                         results[self._iparam] = callback(results[self._iparam])
                         self._iparam += 1
                 else:

@@ -9,25 +9,22 @@
 #  included in the root directory of this package.
 from __future__ import absolute_import, division, print_function
 
-try:
-    import __builtin__
-except ImportError:
-    import builtins as __builtin__
-
+import builtins
 import collections
 import logging
 import operator
 import warnings
 
 import boost.python
-from dials.model import data
-from dials_array_family_flex_ext import *
+import cctbx
+import libtbx.smart_open
+import six
+import six.moves.cPickle as pickle
 from cctbx.array_family.flex import *
 from cctbx.array_family import flex
-import cctbx
-from cctbx import miller, crystal
+from cctbx import miller
+from dials_array_family_flex_ext import *
 from dials.util import Sorry
-import libtbx.smart_open
 from scitbx import matrix
 
 logger = logging.getLogger(__name__)
@@ -224,12 +221,13 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         :return: The reflection table
 
         """
-        import six.moves.cPickle as pickle
-
         if filename and hasattr(filename, "__fspath__"):
             filename = filename.__fspath__()
         with libtbx.smart_open.for_reading(filename, "rb") as infile:
-            result = pickle.load(infile)
+            if six.PY3:
+                result = pickle.load(infile, encoding="bytes")
+            else:
+                result = pickle.load(infile)
             assert isinstance(result, reflection_table)
             return result
 
@@ -258,7 +256,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
             warnings.warn(
                 "blosc compression is deprecated", DeprecationWarning, stacklevel=2
             )
-        except blosc.blosc_extension.error as e:
+        except blosc.blosc_extension.error:
             # We now accept uncompressed data
             pass
         return reflection_table.from_msgpack(infile_data)
@@ -351,13 +349,13 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         if "px" in key:
             spots = [
                 detector[table["panel"][i]].get_pixel_lab_coord(spots[i][0:2])
-                for i in xrange(len(spots))
+                for i in range(len(spots))
             ]
         else:
             assert "mm" in key
             spots = [
                 detector[table["panel"][i]].get_lab_coord(spots[i][0:2])
-                for i in xrange(len(spots))
+                for i in range(len(spots))
             ]
 
         min_f = max_f = min_s = max_s = 0
@@ -399,8 +397,6 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         :param filename: The output filename
 
         """
-        import six.moves.cPickle as pickle
-
         # Clean up any removed experiments from the identifiers map
         self.clean_experiment_identifiers_map()
 
@@ -500,7 +496,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
             data = self[name]
             if order is None:
                 perm = flex.size_t(
-                    __builtin__.sorted(
+                    builtins.sorted(
                         range(len(self)), key=lambda x: data[x], reverse=reverse
                     )
                 )
@@ -513,7 +509,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
                     return cmp(a, b)
 
                 perm = flex.size_t(
-                    __builtin__.sorted(
+                    builtins.sorted(
                         range(len(self)),
                         key=lambda x: data[x],
                         cmp=compare,
@@ -521,7 +517,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
                     )
                 )
         else:
-            perm = flex.sort_permutation(self[name], reverse=reverse)
+            perm = flex.sort_permutation(self[name], reverse=reverse, stable=True)
         self.reorder(perm)
 
     """
@@ -606,7 +602,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         # Create the list of matches
         match1 = []
         match2 = []
-        for item, value in lookup.iteritems():
+        for item, value in lookup.items():
             if len(value.b) == 0:
                 continue
             elif len(value.a) == 1 and len(value.b) == 1:
@@ -621,12 +617,12 @@ class reflection_table_aux(boost.python.injector, reflection_table):
                         dy = y1[i] - y2[j]
                         dz = z1[i] - z2[j]
                         d.append((i, j, dx ** 2 + dy ** 2 + dz ** 2))
-                    i, j, d = __builtin__.min(d, key=lambda x: x[2])
+                    i, j, d = builtins.min(d, key=lambda x: x[2])
                     if j not in matched:
                         matched[j] = (i, d)
                     elif d < matched[j][1]:
                         matched[j] = (i, d)
-                for key1, value1 in matched.iteritems():
+                for key1, value1 in matched.items():
                     match1.append(value1[0])
                     match2.append(key1)
 
@@ -636,7 +632,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
 
         # Sort by self index
         sort_index = flex.size_t(
-            __builtin__.sorted(range(len(sind)), key=lambda x: sind[x])
+            builtins.sorted(range(len(sind)), key=lambda x: sind[x])
         )
         sind = sind.select(sort_index)
         oind = oind.select(sort_index)
@@ -721,7 +717,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         # Create the list of matches
         match1 = []
         match2 = []
-        for item, value in lookup.iteritems():
+        for item, value in lookup.items():
             if len(value.b) == 0:
                 continue
             elif len(value.a) == 1 and len(value.b) == 1:
@@ -736,12 +732,12 @@ class reflection_table_aux(boost.python.injector, reflection_table):
                         dy = y1[i] - y2[j]
                         dz = z1[i] - z2[j]
                         d.append((i, j, dx ** 2 + dy ** 2 + dz ** 2))
-                    i, j, d = __builtin__.min(d, key=lambda x: x[2])
+                    i, j, d = builtins.min(d, key=lambda x: x[2])
                     if j not in matched:
                         matched[j] = (i, d)
                     elif d < matched[j][1]:
                         matched[j] = (i, d)
-                for key1, value1 in matched.iteritems():
+                for key1, value1 in matched.items():
                     match1.append(value1[0])
                     match2.append(key1)
 
@@ -751,7 +747,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
 
         # Sort by self index
         sort_index = flex.size_t(
-            __builtin__.sorted(range(len(sind)), key=lambda x: sind[x])
+            builtins.sorted(range(len(sind)), key=lambda x: sind[x])
         )
         sind = sind.select(sort_index)
         oind = oind.select(sort_index)
@@ -1095,7 +1091,6 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         :return: True/False overloaded for each reflection
 
         """
-        from dxtbx.model.experiment_list import ExperimentList
         from dials.algorithms.shoebox import OverloadChecker
 
         assert "shoebox" in self
@@ -1103,7 +1098,7 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         detectors = [expr.detector for expr in experiments]
         checker = OverloadChecker()
         for detector in detectors:
-            checker.add(flex.double((p.get_trusted_range()[1] for p in detector)))
+            checker.add(flex.double(p.get_trusted_range()[1] for p in detector))
         result = checker(self["id"], self["shoebox"])
         self.set_flags(result, self.flags.overloaded)
         return result
@@ -1162,7 +1157,6 @@ class reflection_table_aux(boost.python.injector, reflection_table):
 
         # Get the panel and id
         panel = self["panel"]
-        exp_id = self["id"]
 
         # Group according to imageset
         if experiments is not None:
@@ -1247,12 +1241,12 @@ class reflection_table_aux(boost.python.injector, reflection_table):
         """
         identifiers = self.experiment_identifiers()
         if len(identifiers) > 0:
-            values = identifiers.values()
+            values = list(identifiers.values())
             assert len(set(values)) == len(values), (len(set(values)), len(values))
             if "id" in self:
                 index = set(self["id"])
                 for i in index:
-                    assert i in identifiers.keys(), (i, list(identifiers.keys()))
+                    assert i in identifiers, (i, list(identifiers))
         if experiments is not None:
             if len(identifiers) > 0:
                 assert len(identifiers) == len(experiments), (
@@ -1368,7 +1362,7 @@ Found %s"""
         data in the table. Primarily to call as saving data to give a
         consistent table and map.
         """
-        dataset_ids_in_table = set(self["id"]).difference(set([-1]))
+        dataset_ids_in_table = set(self["id"]).difference({-1})
         dataset_ids_in_map = set(self.experiment_identifiers().keys())
         ids_to_remove = dataset_ids_in_map.difference(dataset_ids_in_table)
         for i in ids_to_remove:
@@ -1411,7 +1405,7 @@ Found %s"""
         self["xyzobs.mm.variance"] = flex.vec3_double(len(self))
         # e.g. data imported from XDS; no variance known then; since is used
         # only for weights assign as 1 => uniform weights
-        if not "xyzobs.px.variance" in self:
+        if "xyzobs.px.variance" not in self:
             self["xyzobs.px.variance"] = flex.vec3_double(len(self), (1, 1, 1))
         panel_numbers = flex.size_t(self["panel"])
         for i_panel in range(len(detector)):
@@ -1472,6 +1466,41 @@ Found %s"""
                 )
             else:
                 self["rlp"].set_selected(sel, S)
+
+    def calculate_entering_flags(self, experiments):
+        """Calculate the entering flags for the reflections.
+
+        Calculate a unit vector normal to the spindle-beam plane for this experiment,
+        such that the vector placed at the centre of the Ewald sphere points to the
+        hemispere in which reflections cross from inside to outside of the sphere
+        (reflections are exiting). Adds the array of boolean entering flags to self
+        as the "entering" column.
+
+        Note:
+            NB this vector is in +ve Y direction when using imgCIF coordinate frame.
+
+        Args:
+
+            experiments: The experiment list to use in calculating the entering flags.
+
+        """
+
+        assert "s1" in self
+
+        # Init entering flags. These are always False for experiments that have no
+        # rotation axis.
+        enterings = flex.bool(len(self), False)
+
+        for iexp, exp in enumerate(experiments):
+            if not exp.goniometer:
+                continue
+            axis = matrix.col(exp.goniometer.get_rotation_axis())
+            s0 = matrix.col(exp.beam.get_s0())
+            vec = s0.cross(axis)
+            sel = self["id"] == iexp
+            enterings.set_selected(sel, self["s1"].dot(vec) < 0.0)
+
+        self["entering"] = enterings
 
 
 try:
@@ -1573,11 +1602,11 @@ class reflection_table_selector(object):
             mask1 = None
             data = reflections[self.column]
         if isinstance(data, double):
-            value = __builtin__.float(self.value)
+            value = builtins.float(self.value)
         elif isinstance(data, int):
-            value = __builtin__.int(self.value)
+            value = builtins.int(self.value)
         elif isinstance(data, size_t):
-            value = __builtin__.int(self.value)
+            value = builtins.int(self.value)
         elif isinstance(data, std_string):
             value = self.value
         elif isinstance(data, vec3_double):
@@ -1592,7 +1621,7 @@ class reflection_table_selector(object):
             raise RuntimeError("Comparison not implemented")
         else:
             raise RuntimeError("Unknown column type")
-        mask2 = self.op(data, self.value)
+        mask2 = self.op(data, value)
         if mask1 is not None:
             mask1.set_selected(size_t(range(len(mask1))).select(mask1), mask2)
         else:

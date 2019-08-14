@@ -13,6 +13,7 @@ from __future__ import absolute_import, division, print_function
 
 import logging
 
+from dials.array_family import flex
 from dials.util import Sorry
 
 logger = logging.getLogger("dials.command_line.integrate")
@@ -25,18 +26,18 @@ is called with an experiment list outputted from dials.index or dials.refine and
 a corresponding set of strong spots from which a profile model is calculated.
 The program will output a set of integrated reflections and an experiment list
 with additional profile model data. The data can be reintegrated using the same
-profile model by inputting this integrated_experiments.json file back into
+profile model by inputting this integrated.expt file back into
 dials.integate.
 
 Examples::
 
-  dials.integrate experiments.json indexed.pickle
+  dials.integrate models.expt refined.refl
 
-  dials.integrate experiments.json indexed.pickle output.reflections=integrated.pickle
+  dials.integrate models.expt refined.refl output.reflections=integrated.refl
 
-  dials.integrate experiments.json indexed.pickle profile.fitting=False
+  dials.integrate models.expt refined.refl profile.fitting=False
 
-  dials.integrate experiments.json indexed.pickle background.algorithm=glm
+  dials.integrate models.expt refined.refl background.algorithm=glm
 
 """
 
@@ -47,11 +48,11 @@ phil_scope = parse(
     """
 
   output {
-    experiments = 'integrated_experiments.json'
+    experiments = 'integrated.expt'
       .type = str
       .help = "The experiments output filename"
 
-    reflections = 'integrated.pickle'
+    reflections = 'integrated.refl'
       .type = str
       .help = "The integrated output filename"
 
@@ -120,7 +121,7 @@ phil_scope = parse(
     .type = ints
     .help = "Exclude images from integration (e.g. 1,2,3,4,5 etc)"
 
-  verbosity = 1
+  verbosity = 0
     .type = int(value_min=0)
     .help = "The verbosity level"
 
@@ -141,10 +142,9 @@ class Script(object):
     def __init__(self, phil=phil_scope):
         """Initialise the script."""
         from dials.util.options import OptionParser
-        import libtbx.load_env
 
         # The script usage
-        usage = "usage: %s [options] experiment.json" % libtbx.env.dispatcher_name
+        usage = "usage: dials.integrate [options] models.expt"
 
         # Create the parser
         self.parser = OptionParser(
@@ -199,7 +199,7 @@ class Script(object):
 
         # Log the diff phil
         diff_phil = self.parser.diff_phil.as_str()
-        if diff_phil is not "":
+        if diff_phil != "":
             logger.info("The following parameters have been modified:\n")
             logger.info(diff_phil)
 
@@ -259,7 +259,6 @@ class Script(object):
         # Initialise the integrator
         from dials.algorithms.profile_model.factory import ProfileModelFactory
         from dials.algorithms.integration.integrator import IntegratorFactory
-        from dials.array_family import flex
 
         # Modify experiment list if scan range is set.
         experiments, reference = self.split_for_scan_range(
@@ -438,7 +437,6 @@ class Script(object):
 
     def process_reference(self, reference):
         """ Load the reference spots. """
-        from dials.array_family import flex
         from time import time
         from dials.util import Sorry
 
@@ -539,7 +537,6 @@ class Script(object):
 
     def sample_predictions(self, experiments, predicted, params):
         """ Select a random sample of the predicted reflections to integrate. """
-        from dials.array_family import flex
 
         nref_per_degree = params.sampling.reflections_per_degree
         min_sample_size = params.sampling.minimum_sample_size
@@ -551,7 +548,6 @@ class Script(object):
         from math import pi
 
         RAD2DEG = 180.0 / pi
-        DEG2RAD = pi / 180.0
 
         working_isel = flex.size_t()
         for iexp, exp in enumerate(experiments):
@@ -598,7 +594,6 @@ class Script(object):
         """ Update experiments when scan range is set. """
         from dxtbx.model.experiment_list import ExperimentList
         from dxtbx.model.experiment_list import Experiment
-        from dials.array_family import flex
 
         # Only do anything is the scan range is set
         if scan_range is not None and len(scan_range) > 0:

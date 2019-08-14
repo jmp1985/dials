@@ -33,20 +33,12 @@ output {
 
 
 def run(args):
-    import libtbx.load_env
-
-    usage = (
-        """\
-%s experiments.json reflections.pickle [options]"""
-        % libtbx.env.dispatcher_name
-    )
+    usage = "dials.plot_reflections models.expt observations.refl [options]"
     from dials.util.options import OptionParser
-    from dials.util.options import flatten_experiments
     from dials.util.options import flatten_experiments
     from dials.util.options import flatten_reflections
     from scitbx.array_family import flex
     from scitbx import matrix
-    from dials.util import Sorry
 
     parser = OptionParser(
         usage=usage,
@@ -91,7 +83,7 @@ def run(args):
             sel = flex.bool(len(reflection_list), False)
 
             xyzcal_px = None
-            xyzcal_px = None
+            xyzobs_px = None
 
             if "xyzcal.px" in reflection_list:
                 xyzcal_px = reflection_list["xyzcal.px"]
@@ -105,7 +97,6 @@ def run(args):
             else:
                 raise Sorry("No pixel coordinates given in input reflections.")
 
-            reflections_in_range = False
             for scan_range in params.scan_range:
                 if scan_range is None:
                     continue
@@ -181,24 +172,9 @@ def run(args):
         pyplot.scatter(obs_x, obs_y, marker="o", c="white", s=marker_size, alpha=1)
     if pred_x.size():
         pyplot.scatter(pred_x, pred_y, marker="+", s=marker_size, c="blue")
-    # assert len(detector) == 1
-    panel = detector[0]
-    # if len(detector) > 1:
-    xmin = max(
-        [
-            detector[i_panel].get_image_size_mm()[0] + panel_origin_shifts[i_panel][0]
-            for i_panel in range(len(detector))
-        ]
-    )
     xmax = max(
         [
             detector[i_panel].get_image_size_mm()[0] + panel_origin_shifts[i_panel][0]
-            for i_panel in range(len(detector))
-        ]
-    )
-    ymax = max(
-        [
-            detector[i_panel].get_image_size_mm()[1] + panel_origin_shifts[i_panel][1]
             for i_panel in range(len(detector))
         ]
     )

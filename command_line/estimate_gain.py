@@ -1,8 +1,10 @@
 from __future__ import absolute_import, division, print_function
 
+import sys
+
 import iotbx.phil
-from dials.util.options import OptionParser, flatten_experiments
 from dials.util import Sorry
+from dials.util.options import OptionParser, flatten_experiments
 from scitbx.array_family import flex
 
 help_message = """
@@ -16,7 +18,7 @@ noise being identified as diffraction spots.
 
 Examples::
 
-  dials.estimate_gain experiments.json
+  dials.estimate_gain models.expt
 
 """
 
@@ -45,7 +47,7 @@ def estimate_gain(imageset, kernel_size=(10, 10), output_gain_map=None, max_imag
 
     gains = flex.double()
 
-    for image_no in xrange(len(imageset)):
+    for image_no in range(len(imageset)):
         raw_data = imageset.get_raw_data(image_no)
 
         gain_value = 1
@@ -63,20 +65,19 @@ def estimate_gain(imageset, kernel_size=(10, 10), output_gain_map=None, max_imag
         nsigma_s = 3
         global_threshold = 0
 
-        kabsch_debug_list = []
-        for i_panel in range(len(detector)):
-            kabsch_debug_list.append(
-                DispersionThresholdDebug(
-                    raw_data[i_panel].as_double(),
-                    mask[i_panel],
-                    gain_map[i_panel],
-                    kernel_size,
-                    nsigma_b,
-                    nsigma_s,
-                    global_threshold,
-                    min_local,
-                )
+        kabsch_debug_list = [
+            DispersionThresholdDebug(
+                raw_data[i_panel].as_double(),
+                mask[i_panel],
+                gain_map[i_panel],
+                kernel_size,
+                nsigma_b,
+                nsigma_s,
+                global_threshold,
+                min_local,
             )
+            for i_panel in range(len(detector))
+        ]
 
         dispersion = flex.double()
         for kabsch in kabsch_debug_list:
@@ -124,25 +125,11 @@ def estimate_gain(imageset, kernel_size=(10, 10), output_gain_map=None, max_imag
         with open(output_gain_map, "wb") as fh:
             pickle.dump(gain_map, fh, protocol=pickle.HIGHEST_PROTOCOL)
 
-    if 0:
-        sel = flex.random_selection(
-            population_size=len(sorted_dispersion), sample_size=10000
-        )
-        sorted_dispersion = sorted_dispersion.select(sel)
-
-        from matplotlib import pyplot
-
-        pyplot.scatter(range(len(sorted_dispersion)), sorted_dispersion)
-        pyplot.ylim(0, 10)
-        pyplot.show()
-
     return gain0
 
 
 def run(args):
-    import libtbx.load_env
-
-    usage = "%s [options] experiments.json" % libtbx.env.dispatcher_name
+    usage = "dials.estimate_gain [options] models.expt"
 
     parser = OptionParser(
         usage=usage,
@@ -161,7 +148,7 @@ def run(args):
 
     # Log the diff phil
     diff_phil = parser.diff_phil.as_str()
-    if diff_phil is not "":
+    if diff_phil != "":
         print("The following parameters have been modified:\n")
         print(diff_phil)
 
@@ -181,10 +168,6 @@ def run(args):
         imageset, params.kernel_size, params.output.gain_map, params.max_images
     )
 
-    return
-
 
 if __name__ == "__main__":
-    import sys
-
     run(sys.argv[1:])

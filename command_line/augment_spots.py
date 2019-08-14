@@ -2,9 +2,8 @@ from __future__ import absolute_import, division, print_function
 
 import iotbx.phil
 from dials.util.options import OptionParser
+from dials.util.options import flatten_experiments
 from dials.util.options import flatten_reflections
-from dials.util.options import flatten_experiments
-from dials.util.options import flatten_experiments
 from dials.array_family import flex
 
 help_message = """
@@ -14,7 +13,7 @@ in peak region etc."""
 phil_scope = iotbx.phil.parse(
     """
 output {
-  reflections = stronger.pickle
+  reflections = stronger.refl
     .type = path
 }
 find_max = False
@@ -43,7 +42,6 @@ def add_max_pixels_to_reflections(reflections):
 
     reflections["max_pixel"] = max_pixel
     reflections["max_valid"] = max_valid
-    return
 
 
 def add_resolution_to_reflections(reflections, experiments):
@@ -81,7 +79,6 @@ def augment_reflections(reflections, params, experiments=None):
         add_max_pixels_to_reflections(reflections)
 
     x0, x1, y0, y1, z0, z1 = reflections["bbox"].parts()
-    x, y, z = reflections["xyzobs.px.value"].parts()
 
     dx = x1 - x0
     dy = y1 - y0
@@ -100,11 +97,9 @@ def augment_reflections(reflections, params, experiments=None):
 
 
 def run(args):
-    import libtbx.load_env
     from dials.util import Sorry
-    from dials.util import log
 
-    usage = "%s [options] [experiments.json] strong.pickle" % libtbx.env.dispatcher_name
+    usage = "dials.augment_spots [options] [models.expt] strong.refl"
 
     parser = OptionParser(
         usage=usage,

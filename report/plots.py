@@ -193,7 +193,7 @@ class IntensityStatisticsPlots(ResolutionPlotterMixin):
         anomalous=False,
         n_resolution_bins=20,
         xtriage_analyses=None,
-        run_xtraige_analysis=True,
+        run_xtriage_analysis=True,
     ):
         self.n_bins = n_resolution_bins
         self._xanalysis = xtriage_analyses
@@ -204,7 +204,7 @@ class IntensityStatisticsPlots(ResolutionPlotterMixin):
         self.binner = intensities.binner()
         self.merged_intensities = merged.array()
         self.multiplicities = merged.redundancies().complete_array(new_data_value=0)
-        if not self._xanalysis and run_xtraige_analysis:
+        if not self._xanalysis and run_xtriage_analysis:
             # imports needed here or won't work, unsure why.
             from mmtbx.scaling.xtriage import xtriage_analyses
             from mmtbx.scaling.xtriage import master_params as xtriage_master_params
@@ -249,15 +249,15 @@ class IntensityStatisticsPlots(ResolutionPlotterMixin):
             "multiplicities": {
                 "data": [
                     {
-                        "x": multiplicities_acentric.keys(),
-                        "y": multiplicities_acentric.values(),
+                        "x": list(multiplicities_acentric.keys()),
+                        "y": list(multiplicities_acentric.values()),
                         "type": "bar",
                         "name": "Acentric",
                         "opacity": 0.75,
                     },
                     {
-                        "x": multiplicities_centric.keys(),
-                        "y": multiplicities_centric.values(),
+                        "x": list(multiplicities_centric.keys()),
+                        "y": list(multiplicities_centric.values()),
                         "type": "bar",
                         "name": "Centric",
                         "opacity": 0.75,
@@ -517,26 +517,39 @@ class ResolutionPlotsAndStats(ResolutionPlotterMixin):
 
     def cc_one_half_plot(self, method=None):
         """Make a plot of cc half against resolution."""
+
         if method == "sigma_tau":
             cc_one_half_bins = [
                 bin_stats.cc_one_half_sigma_tau
+                if bin_stats.cc_one_half_sigma_tau
+                else 0.0
                 for bin_stats in self.dataset_statistics.bins
             ]
             cc_one_half_critical_value_bins = [
                 bin_stats.cc_one_half_sigma_tau_critical_value
+                if bin_stats.cc_one_half_sigma_tau_critical_value
+                else 0.0
                 for bin_stats in self.dataset_statistics.bins
             ]
         else:
             cc_one_half_bins = [
-                bin_stats.cc_one_half for bin_stats in self.dataset_statistics.bins
+                bin_stats.cc_one_half if bin_stats.cc_one_half else 0.0
+                for bin_stats in self.dataset_statistics.bins
             ]
             cc_one_half_critical_value_bins = [
                 bin_stats.cc_one_half_critical_value
+                if bin_stats.cc_one_half_critical_value
+                else 0.0
                 for bin_stats in self.dataset_statistics.bins
             ]
-        cc_anom_bins = [bin_stats.cc_anom for bin_stats in self.dataset_statistics.bins]
+        cc_anom_bins = [
+            bin_stats.cc_anom if bin_stats.cc_anom else 0.0
+            for bin_stats in self.dataset_statistics.bins
+        ]
         cc_anom_critical_value_bins = [
             bin_stats.cc_anom_critical_value
+            if bin_stats.cc_anom_critical_value
+            else 0.0
             for bin_stats in self.dataset_statistics.bins
         ]
 
@@ -718,7 +731,7 @@ class ResolutionPlotsAndStats(ResolutionPlotterMixin):
                         "tickvals": self.d_star_sq_tickvals,
                         "ticktext": self.d_star_sq_ticktext,
                     },
-                    "yaxis": {"title": "Multiplicity"},
+                    "yaxis": {"title": "Multiplicity", "rangemode": "tozero"},
                 },
             }
         }
@@ -1040,7 +1053,7 @@ https://doi.org/10.1107/S0907444905036693
             a = 0.5
 
         y = flex.sorted(delta)
-        x = [norm.quantile((i + 1 - a) / (n + 1 - (2 * a))) for i in xrange(n)]
+        x = [norm.quantile((i + 1 - a) / (n + 1 - (2 * a))) for i in range(n)]
 
         H, xedges, yedges = np.histogram2d(
             np.array(x), y.as_numpy_array(), bins=(200, 200)

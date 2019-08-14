@@ -9,17 +9,17 @@ have not changed format and so on.
 
 from __future__ import absolute_import, division, print_function
 
-import copy
-import six.moves.cPickle as pickle
 import os
-from libtbx import easy_run
-from libtbx.test_utils import approx_equal
-from dxtbx.model.experiment_list import ExperimentListFactory
-from dials.array_family import flex
+
+import procrunner
 import pytest
+from dials.algorithms.refinement.engine import Journal
+from dials.array_family import flex
+from dxtbx.model.experiment_list import ExperimentListFactory
+from libtbx.test_utils import approx_equal
 
 
-def test1(dials_regression, run_in_tmpdir):
+def test1(dials_regression, tmpdir):
     # use the i04_weak_data for this test
     data_dir = os.path.join(dials_regression, "refinement_test_data", "i04_weak_data")
     experiments_path = os.path.join(data_dir, "experiments.json")
@@ -30,20 +30,22 @@ def test1(dials_regression, run_in_tmpdir):
 
     # set some old defaults
     cmd = (
-        "dials.refine close_to_spindle_cutoff=0.05 reflections_per_degree=100 "
-        + "outlier.separate_blocks=False "
-        + experiments_path
-        + " "
-        + pickle_path
+        "dials.refine",
+        "close_to_spindle_cutoff=0.05",
+        "reflections_per_degree=100",
+        "outlier.separate_blocks=False",
+        "scan_varying=False",
+        experiments_path,
+        pickle_path,
     )
-
-    result = easy_run.fully_buffered(command=cmd).raise_if_errors()
+    result = procrunner.run(cmd, working_directory=tmpdir)
+    assert not result.returncode and not result.stderr
     # load results
     reg_exp = ExperimentListFactory.from_json_file(
         os.path.join(data_dir, "regression_experiments.json"), check_format=False
     )[0]
     ref_exp = ExperimentListFactory.from_json_file(
-        "refined_experiments.json", check_format=False
+        tmpdir.join("refined.expt").strpath, check_format=False
     )[0]
 
     # test refined models against expected
@@ -58,7 +60,7 @@ def test1(dials_regression, run_in_tmpdir):
     assert ref_exp.crystal.get_cell_volume_sd() == pytest.approx(23.8063382, abs=1e-6)
 
 
-def test2(dials_regression, run_in_tmpdir):
+def test2(dials_regression, tmpdir):
     """Run scan-varying refinement, comparing RMSD table with expected values.
     This test automates what was manually done periodically and recorded in
     dials_regression/refinement_test_data/centroid/README.txt"""
@@ -71,32 +73,40 @@ def test2(dials_regression, run_in_tmpdir):
     for pth in (experiments_path, pickle_path):
         assert os.path.exists(pth)
 
-    # scan-static refinement first to get refined_experiments.json as start point
-    cmd1 = (
-        "dials.refine "
-        + experiments_path
-        + " "
-        + pickle_path
-        + " reflections_per_degree=50 "
-        " outlier.algorithm=null close_to_spindle_cutoff=0.05"
+    # scan-static refinement first to get refined.expt as start point
+    result = procrunner.run(
+        (
+            "dials.refine",
+            experiments_path,
+            pickle_path,
+            "scan_varying=False",
+            "reflections_per_degree=50",
+            "outlier.algorithm=null",
+            "close_to_spindle_cutoff=0.05",
+        ),
+        working_directory=tmpdir,
     )
-    cmd2 = (
-        "dials.refine refined_experiments.json "
-        + pickle_path
-        + " scan_varying=true output.history=history.pickle"
-        " reflections_per_degree=50"
-        " outlier.algorithm=null close_to_spindle_cutoff=0.05"
-        " crystal.orientation.smoother.interval_width_degrees=36.0"
-        " crystal.unit_cell.smoother.interval_width_degrees=36.0"
-        " set_scan_varying_errors=True"
+    assert not result.returncode and not result.stderr
+    result = procrunner.run(
+        (
+            "dials.refine",
+            "refined.expt",
+            pickle_path,
+            "scan_varying=true",
+            "output.history=history.json",
+            "reflections_per_degree=50",
+            "outlier.algorithm=null",
+            "close_to_spindle_cutoff=0.05",
+            "crystal.orientation.smoother.interval_width_degrees=36.0",
+            "crystal.unit_cell.smoother.interval_width_degrees=36.0",
+            "set_scan_varying_errors=True",
+        ),
+        working_directory=tmpdir,
     )
-
-    result1 = easy_run.fully_buffered(command=cmd1).raise_if_errors()
-    result2 = easy_run.fully_buffered(command=cmd2).raise_if_errors()
+    assert not result.returncode and not result.stderr
 
     # load and check results
-    with open("history.pickle", "rb") as fh:
-        history = pickle.load(fh)
+    history = Journal.from_json_file(tmpdir.join("history.json").strpath)
 
     expected_rmsds = [
         (0.088488398, 0.114583571, 0.001460382),
@@ -115,12 +125,12 @@ def test2(dials_regression, run_in_tmpdir):
     assert approx_equal(history["rmsd"], expected_rmsds)
 
     # check that the used_in_refinement flag got set correctly
-    rt = flex.reflection_table.from_pickle("refined.pickle")
+    rt = flex.reflection_table.from_pickle(tmpdir.join("refined.refl").strpath)
     uir = rt.get_flags(rt.flags.used_in_refinement)
     assert uir.count(True) == history["num_reflections"][-1]
 
 
-def test3(dials_regression, run_in_tmpdir):
+def test3(dials_regression, tmpdir):
     """Strict check for scan-varying refinement using automated outlier rejection
     block width and interval width setting"""
 
@@ -132,20 +142,23 @@ def test3(dials_regression, run_in_tmpdir):
     for pth in (experiments_path, pickle_path):
         assert os.path.exists(pth)
 
-    cmd1 = (
-        "dials.refine "
-        + experiments_path
-        + " "
-        + pickle_path
-        + " scan_varying=true max_iterations=5 output.history=history.pickle "
-        "crystal.orientation.smoother.interval_width_degrees=auto "
-        "crystal.unit_cell.smoother.interval_width_degrees=auto"
+    result = procrunner.run(
+        (
+            "dials.refine",
+            experiments_path,
+            pickle_path,
+            "scan_varying=true",
+            "max_iterations=5",
+            "output.history=history.json",
+            "crystal.orientation.smoother.interval_width_degrees=auto",
+            "crystal.unit_cell.smoother.interval_width_degrees=auto",
+        ),
+        working_directory=tmpdir,
     )
-    result1 = easy_run.fully_buffered(command=cmd1).raise_if_errors()
+    assert not result.returncode and not result.stderr
 
     # load and check results
-    with open("history.pickle", "rb") as fh:
-        history = pickle.load(fh)
+    history = Journal.from_json_file(tmpdir.join("history.json").strpath)
 
     expected_rmsds = [
         [0.619507829, 0.351326044, 0.006955399],
@@ -159,116 +172,9 @@ def test3(dials_regression, run_in_tmpdir):
 
     # check the refined unit cell
     ref_exp = ExperimentListFactory.from_json_file(
-        "refined_experiments.json", check_format=False
+        tmpdir.join("refined.expt").strpath, check_format=False
     )[0]
     unit_cell = ref_exp.crystal.get_unit_cell().parameters()
     assert unit_cell == pytest.approx(
         [42.27482, 42.27482, 39.66893, 90.00000, 90.00000, 90.00000], abs=1e-3
     )
-
-
-# Test the functionality of the parameter 'auto reduction' extension modules
-def test4():
-    from dials_refinement_helpers_ext import pg_surpl_iter as pg_surpl
-    from dials_refinement_helpers_ext import uc_surpl_iter as uc_surpl
-    from dials_refinement_helpers_ext import surpl_iter as surpl
-
-    # Borrowed from tst_reflection_table function tst_find_overlapping
-    from random import randint, uniform
-
-    N = 110
-    r = flex.reflection_table.empty_standard(N)
-    r["panel"] = flex.size_t([1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0] * 10)
-    r["id"] = flex.int([1, 2, 1, 1, 2, 0, 1, 1, 1, 0, 1] * 10)
-    exp_ids = flex.size_t([0, 1])
-    for i in xrange(N):
-        r["miller_index"][i] = (
-            int(i // 10) - 5,
-            i % 3,
-            i % 7,
-        )  # A nice bunch of miller indices
-
-    """
-   Filter out reflections to be used by refinement. Sorting of filtered reflections require
-   to allow C++ extension modules to give performance benefit. Sorting performed within the
-   _filter_reflections step by id, then by panel.
-  """
-    r_sorted = copy.deepcopy(r)
-    r_sorted.sort("id")
-    r_sorted.subsort("id", "panel")
-
-    # Test that the unfiltered/unsorted table becomes filtered/sorted for id
-    assert (r_sorted["id"] == r["id"].select(flex.sort_permutation(r["id"]))).count(
-        False
-    ) == 0
-    # as above for panel within each id
-    for ii in [0, 1, 2]:
-        r_id = r.select(r["id"] == ii)
-        r_sorted_id = r_sorted.select(r_sorted["id"] == ii)
-        assert (
-            r_sorted_id["panel"]
-            == r_id["panel"].select(flex.sort_permutation(r_id["panel"]))
-        ).count(False) == 0
-
-    ############################################################
-    # Cut-down original algorithm for AutoReduce._surplus_reflections
-    ############################################################
-    isel = flex.size_t()
-    for exp_id in exp_ids:
-        isel.extend((r["id"] == exp_id).iselection())
-    res0 = len(isel)
-
-    # Updated algorithm for _surplus_reflections, with templated id column for int and size_t
-    res1_unsrt_int = surpl(r["id"], exp_ids).result
-    res1_int = surpl(r_sorted["id"], exp_ids).result
-    res1_sizet = surpl(flex.size_t(list(r_sorted["id"])), exp_ids).result
-
-    # Check that unsorted list fails, while sorted succeeds for both int and size_t array types
-    assert res0 != res1_unsrt_int
-    assert res0 == res1_int
-    assert res0 == res1_sizet
-
-    ############################################################
-    # Cut-down original algorithm for AutoReduce._unit_cell_surplus_reflections
-    ############################################################
-    ref = r_sorted.select(isel)
-    h = ref["miller_index"].as_vec3_double()
-    dB_dp = flex.mat3_double([(1, 2, 3, 4, 5, 6, 7, 8, 9), (0, 1, 0, 1, 0, 1, 0, 1, 0)])
-    nref_each_param = []
-    for der in dB_dp:
-        tst = (der * h).norms()
-        nref_each_param.append((tst > 0.0).count(True))
-    res0 = min(nref_each_param)
-
-    # Updated algorithm for _unit_cell_surplus_reflections
-    res1_unsrt_int = uc_surpl(r["id"], r["miller_index"], exp_ids, dB_dp).result
-    res1_int = uc_surpl(r_sorted["id"], r_sorted["miller_index"], exp_ids, dB_dp).result
-    res1_sizet = uc_surpl(
-        flex.size_t(list(r_sorted["id"])), r_sorted["miller_index"], exp_ids, dB_dp
-    ).result
-    assert res0 != res1_unsrt_int
-    assert res0 == res1_int
-    assert res0 == res1_sizet
-
-    ############################################################
-    # Cut-down original algorithm for AutoReduce._panel_gp_surplus_reflections
-    ############################################################
-    isel = flex.size_t()
-    pnl_ids = [0, 1]
-    for exp_id in exp_ids:
-        sub_expID = (r["id"] == exp_id).iselection()
-        sub_panels_expID = r["panel"].select(sub_expID)
-        for pnl in pnl_ids:
-            isel.extend(sub_expID.select(sub_panels_expID == pnl))
-    nref = len(isel)
-    res0 = nref
-
-    # Updated algorithm for _panel_gp_surplus_reflections
-    res1_unsrt_int = pg_surpl(r["id"], r["panel"], pnl_ids, exp_ids, 0).result
-    res1_int = pg_surpl(r_sorted["id"], r_sorted["panel"], pnl_ids, exp_ids, 0).result
-    res1_sizet = pg_surpl(
-        flex.size_t(list(r_sorted["id"])), r_sorted["panel"], pnl_ids, exp_ids, 0
-    ).result
-    assert res0 != res1_unsrt_int
-    assert res0 == res1_int
-    assert res0 == res1_sizet

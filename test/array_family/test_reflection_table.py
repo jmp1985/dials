@@ -2,19 +2,17 @@ from __future__ import absolute_import, division, print_function
 
 import copy
 import os
+import random
+
 import pytest
-
-from dials.array_family import flex
-from dxtbx.model import ExperimentList, Experiment, Crystal
-from dials.util import Sorry
-from dxtbx.serialize import load
-
 from cctbx import sgtbx
+from dials.array_family import flex
+from dials.util import Sorry
+from dxtbx.model import ExperimentList, Experiment, Crystal
+from dxtbx.serialize import load
 
 
 def test_init():
-    from dials.array_family import flex
-
     # test default
     table = flex.reflection_table()
     assert table.is_consistent()
@@ -43,22 +41,17 @@ def test_init():
     assert not table.empty()
 
     # test with invalid columns
-    try:
-        table = flex.reflection_table(
+    with pytest.raises(RuntimeError):
+        _ = flex.reflection_table(
             [
                 ("col1", flex.int(10)),
                 ("col2", flex.double(20)),
                 ("col3", flex.std_string(10)),
             ]
         )
-        assert false
-    except Exception:
-        pass
 
 
 def test_resizing():
-    from dials.array_family import flex
-
     # Create a table with 2 empty columns
     table = flex.reflection_table()
     assert table.empty()
@@ -79,11 +72,8 @@ def test_resizing():
     assert table.ncols() == 2
 
     # Add an extra column with the wrong size (throw)
-    try:
+    with pytest.raises(RuntimeError):
         table["col3"] = flex.std_string(20)
-        assert False
-    except Exception:
-        pass
     assert table.nrows() == 10
     assert table.ncols() == 2
     assert table.is_consistent()
@@ -115,8 +105,6 @@ def test_resizing():
 
 
 def test_delete():
-    from dials.array_family import flex
-
     # Test del item
     table = flex.reflection_table()
     table["col1"] = flex.int([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
@@ -126,7 +114,7 @@ def test_delete():
     assert table.is_consistent()
     assert table.nrows() == 10
     assert table.ncols() == 2
-    assert not "col3" in table
+    assert "col3" not in table
 
     # Test del row
     del table[5]
@@ -150,8 +138,6 @@ def test_delete():
 
 
 def test_row_operations():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -259,8 +245,6 @@ def test_row_operations():
 
 
 def test_iteration():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -300,8 +284,6 @@ def test_iteration():
 
 
 def test_slicing():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -363,8 +345,6 @@ def test_slicing():
 
 
 def test_updating():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -399,11 +379,8 @@ def test_updating():
     # Create a table with some elements
     table2 = flex.reflection_table()
     table2["col3"] = flex.std_string(c3)
-    try:
+    with pytest.raises(RuntimeError):
         table1.update(table2)
-        assert False
-    except Exception:
-        pass
 
     assert table1.is_consistent()
     assert table1.nrows() == 10
@@ -414,8 +391,6 @@ def test_updating():
 
 
 def test_select():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -464,8 +439,6 @@ def test_select():
 
 
 def test_set_selected():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -525,7 +498,6 @@ def test_set_selected():
     table2["col2"] = flex.double(cc2)
     table2["col3"] = flex.std_string(cc3)
 
-    flags = flex.bool([True, True, False, False, False, True, False, False, True, True])
     table1.set_selected(index, table2)
     assert all(a == b for a, b in zip(table1["col1"], ccc1))
     assert all(a == b for a, b in zip(table1["col2"], ccc2))
@@ -533,8 +505,6 @@ def test_set_selected():
 
 
 def test_del_selected():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -575,7 +545,7 @@ def test_del_selected():
     table1["col3"] = flex.std_string(c3)
 
     index = flex.size_t([0, 1, 5, 8, 9])
-    index2 = range(10)
+    index2 = list(range(10))
     for i in index:
         index2.remove(i)
     ccc1 = [c1[i] for i in index2]
@@ -593,7 +563,6 @@ def test_del_selected():
     table1["col2"] = flex.double(c2)
     table1["col3"] = flex.std_string(c3)
 
-    flags = flex.bool([True, True, False, False, False, True, False, False, True, True])
     table1.del_selected(index)
     assert table1.nrows() == len(ccc1)
     assert all(a == b for a, b in zip(table1["col1"], ccc1))
@@ -602,8 +571,6 @@ def test_del_selected():
 
 
 def test_sort():
-    from dials.array_family import flex
-
     table = flex.reflection_table()
     table["a"] = flex.int([2, 4, 3, 1, 5])
     table["b"] = flex.vec2_double([(3, 2), (3, 1), (1, 3), (4, 5), (4, 3)])
@@ -625,8 +592,6 @@ def test_sort():
 
 
 def test_flags():
-    from dials.array_family import flex
-
     # Create a table with flags all 0
     table = flex.reflection_table()
     table["flags"] = flex.size_t(5, 0)
@@ -682,8 +647,6 @@ def test_flags():
 
 
 def test_serialize():
-    from dials.array_family import flex
-
     # The columns as lists
     c1 = list(range(10))
     c2 = list(range(10))
@@ -709,8 +672,6 @@ def test_serialize():
 
 
 def test_copy():
-    from dials.array_family import flex
-
     # Create a table
     table = flex.reflection_table([("col1", flex.int(range(10)))])
 
@@ -737,11 +698,9 @@ def test_copy():
 
 
 def test_extract_shoeboxes():
-    from dials.array_family import flex
-    from random import randint, seed
     from dials.algorithms.shoebox import MaskCode
 
-    seed(0)
+    random.seed(0)
 
     reflections = flex.reflection_table()
     reflections["panel"] = flex.size_t()
@@ -750,26 +709,25 @@ def test_extract_shoeboxes():
     npanels = 2
     width = 1000
     height = 1000
-    nrefl = 10000
     frame0 = 10
     frame1 = 100
     nrefl = 1000
 
     for i in range(nrefl):
-        xs = randint(5, 10)
-        ys = randint(5, 10)
-        x0 = randint(-xs + 1, width - 1)
-        y0 = randint(-ys + 1, height - 1)
-        z0 = randint(frame0, frame1 - 1)
+        xs = random.randint(5, 10)
+        ys = random.randint(5, 10)
+        x0 = random.randint(-xs + 1, width - 1)
+        y0 = random.randint(-ys + 1, height - 1)
+        z0 = random.randint(frame0, frame1 - 1)
         x1 = x0 + xs
         y1 = y0 + ys
-        z1 = min([z0 + randint(1, 10), frame1])
+        z1 = min([z0 + random.randint(1, 10), frame1])
         assert x1 > x0
         assert y1 > y0
         assert z1 > z0
         assert z0 >= frame0 and z1 <= frame1
         bbox = (x0, x1, y0, y1, z0, z1)
-        reflections.append({"panel": randint(0, 1), "bbox": bbox})
+        reflections.append({"panel": random.randint(0, 1), "bbox": bbox})
 
     reflections["shoebox"] = flex.shoebox(reflections["panel"], reflections["bbox"])
     reflections["shoebox"].allocate()
@@ -844,8 +802,6 @@ def test_extract_shoeboxes():
 
 
 def test_split_by_experiment_id():
-    from dials.array_family import flex
-
     r = flex.reflection_table()
     r["id"] = flex.int()
     for i in range(100):
@@ -877,8 +833,6 @@ def test_split_by_experiment_id():
 
 
 def test_split_indices_by_experiment_id():
-    from dials.array_family import flex
-
     r = flex.reflection_table()
     r["id"] = flex.int()
     for i in range(100):
@@ -897,9 +851,6 @@ def test_split_indices_by_experiment_id():
 
 
 def test_split_partials():
-    from dials.array_family import flex
-    from random import randint, uniform
-
     r = flex.reflection_table()
     r["value1"] = flex.double()
     r["value2"] = flex.int()
@@ -907,15 +858,15 @@ def test_split_partials():
     r["bbox"] = flex.int6()
     expected = []
     for i in range(100):
-        x0 = randint(0, 100)
-        x1 = x0 + randint(1, 10)
-        y0 = randint(0, 100)
-        y1 = y0 + randint(1, 10)
-        z0 = randint(0, 100)
-        z1 = z0 + randint(1, 10)
-        v1 = uniform(0, 100)
-        v2 = randint(0, 100)
-        v3 = uniform(0, 100)
+        x0 = random.randint(0, 100)
+        x1 = x0 + random.randint(1, 10)
+        y0 = random.randint(0, 100)
+        y1 = y0 + random.randint(1, 10)
+        z0 = random.randint(0, 100)
+        z1 = z0 + random.randint(1, 10)
+        v1 = random.uniform(0, 100)
+        v2 = random.randint(0, 100)
+        v3 = random.uniform(0, 100)
         r.append(
             {"value1": v1, "value2": v2, "value3": v3, "bbox": (x0, x1, y0, y1, z0, z1)}
         )
@@ -942,8 +893,6 @@ def test_split_partials():
 
 
 def test_split_partials_with_shoebox():
-    from dials.array_family import flex
-    from random import randint, uniform
     from dials.model.data import Shoebox
 
     r = flex.reflection_table()
@@ -955,15 +904,15 @@ def test_split_partials_with_shoebox():
     r["shoebox"] = flex.shoebox()
     expected = []
     for i in range(100):
-        x0 = randint(0, 100)
-        x1 = x0 + randint(1, 10)
-        y0 = randint(0, 100)
-        y1 = y0 + randint(1, 10)
-        z0 = randint(0, 100)
-        z1 = z0 + randint(1, 10)
-        v1 = uniform(0, 100)
-        v2 = randint(0, 100)
-        v3 = uniform(0, 100)
+        x0 = random.randint(0, 100)
+        x1 = x0 + random.randint(1, 10)
+        y0 = random.randint(0, 100)
+        y1 = y0 + random.randint(1, 10)
+        z0 = random.randint(0, 100)
+        z1 = z0 + random.randint(1, 10)
+        v1 = random.uniform(0, 100)
+        v2 = random.randint(0, 100)
+        v3 = random.uniform(0, 100)
         sbox = Shoebox(0, (x0, x1, y0, y1, z0, z1))
         sbox.allocate()
         assert sbox.is_consistent()
@@ -1023,10 +972,6 @@ def test_split_partials_with_shoebox():
 
 
 def test_find_overlapping():
-    from dials.array_family import flex
-    from random import randint, uniform
-    from dials.model.data import Shoebox
-
     N = 10000
     r = flex.reflection_table(N)
     r["bbox"] = flex.int6(N)
@@ -1034,14 +979,14 @@ def test_find_overlapping():
     r["id"] = flex.int(N)
     r["imageset_id"] = flex.int(N)
     for i in range(N):
-        x0 = randint(0, 100)
-        x1 = randint(1, 10) + x0
-        y0 = randint(0, 100)
-        y1 = randint(1, 10) + y0
-        z0 = randint(0, 100)
-        z1 = randint(1, 10) + z0
-        panel = randint(0, 2)
-        pid = randint(0, 2)
+        x0 = random.randint(0, 100)
+        x1 = random.randint(1, 10) + x0
+        y0 = random.randint(0, 100)
+        y1 = random.randint(1, 10) + y0
+        z0 = random.randint(0, 100)
+        z1 = random.randint(1, 10) + z0
+        panel = random.randint(0, 2)
+        pid = random.randint(0, 2)
         r["bbox"][i] = (x0, x1, y0, y1, z0, z1)
         r["panel"][i] = panel
         r["id"][i] = pid
@@ -1095,7 +1040,6 @@ def test_find_overlapping():
 
 def test_to_from_msgpack(tmpdir):
     from dials.model.data import Shoebox
-    from dials.array_family import flex
 
     def gen_shoebox():
         shoebox = Shoebox(0, (0, 4, 0, 3, 0, 1))
@@ -1187,8 +1131,6 @@ def test_to_from_msgpack(tmpdir):
 
 
 def test_experiment_identifiers():
-
-    from dials.array_family import flex
     from dxtbx.model import ExperimentList, Experiment
 
     table = flex.reflection_table()
@@ -1297,7 +1239,6 @@ def test_experiment_identifiers():
     assert table.experiment_identifiers()[3] == "mnop"
     assert table.experiment_identifiers()[4] == "qrst"
 
-    new_table = table.select(flex.size_t([0, 2]))
     assert len(table.experiment_identifiers()) == 5
     assert table.experiment_identifiers()[0] == "abcd"
     assert table.experiment_identifiers()[1] == "efgh"
@@ -1407,7 +1348,7 @@ def test_map_centroids_to_reciprocal_space(dials_regression):
     refl.centroid_px_to_mm(detector, scan=scan)
 
     for k in ("xyzobs.mm.value", "xyzobs.mm.variance"):
-        assert k in refl.keys()
+        assert k in refl
 
     assert refl["xyzobs.mm.value"][0] == pytest.approx(
         (199.43400000000003, 11.908133333333334, 1.4324789835743459)
@@ -1419,7 +1360,7 @@ def test_map_centroids_to_reciprocal_space(dials_regression):
     refl.map_centroids_to_reciprocal_space(detector, beam, goniometer=goniometer)
 
     for k in ("s1", "rlp"):
-        assert k in refl.keys()
+        assert k in refl
 
     assert refl["s1"][0] == pytest.approx(
         (-0.035321308540942425, 0.6030297672949761, -0.8272574664632307)
@@ -1446,3 +1387,25 @@ def test_map_centroids_to_reciprocal_space(dials_regression):
     assert refl1["rlp"][0] == pytest.approx(
         (-0.035321308540942425, 0.6030297672949761, 0.19707031842793443)
     )
+
+
+def test_calculate_entering_flags(dials_regression):
+    data_dir = os.path.join(dials_regression, "indexing_test_data", "i04_weak_data")
+    pickle_path = os.path.join(data_dir, "full.pickle")
+    experiments_path = os.path.join(data_dir, "experiments_import.json")
+
+    refl = flex.reflection_table.from_pickle(pickle_path)
+    experiments = load.experiment_list(experiments_path, check_format=False)
+    experiment = experiments[0]
+    detector = experiment.detector
+    scan = experiment.scan
+    beam = experiment.beam
+    goniometer = experiment.goniometer
+
+    refl.centroid_px_to_mm(detector, scan=scan)
+    refl.map_centroids_to_reciprocal_space(detector, beam, goniometer=goniometer)
+    refl.calculate_entering_flags(experiments)
+    assert "entering" in refl
+    flags = refl["entering"]
+    assert flags.count(True) == 58283
+    assert flags.count(False) == 57799

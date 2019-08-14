@@ -12,9 +12,10 @@ from __future__ import absolute_import, division, print_function
 
 import logging
 
+from libtbx.phil import parse
 from dials.util import Sorry
 from dxtbx.model.experiment_list import ExperimentListDumper
-from dxtbx.model.experiment_list import ExperimentList
+from dxtbx.model.experiment_list import ExperimentListFactory
 
 logger = logging.getLogger("dials.command_line.import_stream")
 
@@ -24,14 +25,13 @@ help_message = """
 """
 
 # Create the phil parameters
-from libtbx.phil import parse
 
 phil_scope = parse(
     """
 
   output {
 
-    experiments = experiments.json
+    experiments = imported.expt
       .type = str
       .help = "The output JSON or pickle file"
 
@@ -57,7 +57,7 @@ phil_scope = parse(
 
   }
 
-  verbosity = 1
+  verbosity = 0
     .type = int(value_min=0)
     .help = "The verbosity level"
 
@@ -117,7 +117,7 @@ class Script(object):
 
         # Log the diff phil
         diff_phil = self.parser.diff_phil.as_str()
-        if diff_phil is not "":
+        if diff_phil != "":
             logger.info("The following parameters have been modified:\n")
             logger.info(diff_phil)
 

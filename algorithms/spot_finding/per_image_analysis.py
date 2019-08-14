@@ -1,18 +1,14 @@
 from __future__ import absolute_import, division, print_function
 
 import math
-from libtbx import group_args
+import sys
+
 from cctbx import sgtbx, uctbx
+from dials.algorithms.integration import filtering
 from dials.array_family import flex
-
-try:
-    import matplotlib
-
-    # http://matplotlib.org/faq/howto_faq.html#generate-images-without-having-a-window-appear
-    matplotlib.use("Agg")  # use a non-interactive backend
-    from matplotlib import pyplot
-except ImportError:
-    pyplot = None
+from libtbx import group_args, table_utils
+from libtbx.math_utils import nearest_integer as nint
+from scitbx import matrix
 
 
 class slot(object):
@@ -23,8 +19,6 @@ class slot(object):
 
 class binner_equal_population(object):
     def __init__(self, d_star_sq, target_n_per_bin=20, max_slots=20, min_slots=5):
-        from libtbx.math_utils import nearest_integer as nint
-
         n_slots = len(d_star_sq) // target_n_per_bin
         if max_slots is not None:
             n_slots = min(n_slots, max_slots)
@@ -155,7 +149,6 @@ def wilson_outliers(reflections, ice_sel=None, p_cutoff=1e-2):
 
 
 def estimate_resolution_limit(reflections, imageset, ice_sel=None, plot_filename=None):
-
     if ice_sel is None:
         ice_sel = flex.bool(len(reflections), False)
 
@@ -195,36 +188,14 @@ def estimate_resolution_limit(reflections, imageset, ice_sel=None, plot_filename
     for i_slot, slot in enumerate(binner.bins):
         sel_all = (d_spacings < slot.d_max) & (d_spacings >= slot.d_min)
         sel = ~(ice_sel) & sel_all
-        # sel = ~(ice_sel) & (d_spacings < slot.d_max) & (d_spacings >= slot.d_min)
-
-        # print "%.2f" %(sel.count(True)/sel_all.count(True))
 
         if sel.count(True) == 0:
-            # outliers_all.set_selected(sel_all & ice_sel, True)
             continue
-            # if i_slot > i_slot_max:
-            # break
-            # else:
-            # continue
 
         outliers = wilson_outliers(
             reflections.select(sel_all), ice_sel=ice_sel.select(sel_all)
         )
-        # print "rejecting %d wilson outliers" %outliers.count(True)
         outliers_all.set_selected(sel_all, outliers)
-
-        # if sel.count(True)/sel_all.count(True) < 0.25:
-        # outliers_all.set_selected(sel_all & ice_sel, True)
-
-        # from scitbx.math import median_statistics
-        # intensities_sel = intensities.select(sel)
-        # stats = median_statistics(intensities_sel)
-        # z_score = 0.6745 * (intensities_sel - stats.median)/stats.median_absolute_deviation
-        # outliers = z_score > 3.5
-        # perm = flex.sort_permutation(intensities_sel)
-        ##print ' '.join('%.2f' %v for v in intensities_sel.select(perm))
-        ##print ' '.join('%.2f' %v for v in z_score.select(perm))
-        ##print
 
         isel = sel_all.iselection().select(~(outliers) & ~(ice_sel).select(sel_all))
         log_i_over_sigi_sel = log_i_over_sigi.select(isel)
@@ -255,16 +226,16 @@ def estimate_resolution_limit(reflections, imageset, ice_sel=None, plot_filename
 
     else:
         # http://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_the_equations_of_the_lines
+        # with:
+        # a_ = m_upper
+        # b_ = m_lower
+        # c_ = c_upper
+        # d_ = c_lower
+        # intersection == ((d_ - c_) / (a_ - b_), (a_ * d_ - b_ * c_) / (a_ - b_))
         intersection = (
             (c_lower - c_upper) / (m_upper - m_lower),
             (m_upper * c_lower - m_lower * c_upper) / (m_upper - m_lower),
         )
-
-        a = m_upper
-        c_ = c_upper
-        b = m_lower
-        d = c_lower
-        assert intersection == ((d - c_) / (a - b), (a * d - b * c_) / (a - b))
 
         # inside = points_inside_envelope(
         # d_star_sq, log_i_over_sigi, m_upper, c_upper, m_lower, c_lower)
@@ -282,8 +253,8 @@ def estimate_resolution_limit(reflections, imageset, ice_sel=None, plot_filename
     # resolution_estimate = max(resolution_estimate, flex.min(d_spacings))
 
     if plot_filename is not None:
-        if pyplot is None:
-            raise Sorry("matplotlib must be installed to generate a plot.")
+        from matplotlib import pyplot
+
         fig = pyplot.figure()
         ax = fig.add_subplot(1, 1, 1)
         ax.scatter(d_star_sq, log_i_over_sigi, marker="+")
@@ -341,14 +312,11 @@ def estimate_resolution_limit(reflections, imageset, ice_sel=None, plot_filename
 
         ax_ = ax.twiny()  # ax2 is responsible for "top" axis and "right" axis
         xticks = ax.get_xticks()
-        xlim = ax.get_xlim()
         xticks_d = [uctbx.d_star_sq_as_d(ds2) if ds2 > 0 else 0 for ds2 in xticks]
-        xticks_ = [ds2 / (xlim[1] - xlim[0]) for ds2 in xticks]
         ax_.set_xticks(xticks)
         ax_.set_xlim(ax.get_xlim())
         ax_.set_xlabel(r"Resolution ($\AA$)")
         ax_.set_xticklabels(["%.1f" % d for d in xticks_d])
-        # pyplot.show()
         pyplot.savefig(plot_filename)
         pyplot.close()
 
@@ -356,7 +324,6 @@ def estimate_resolution_limit(reflections, imageset, ice_sel=None, plot_filename
 
 
 def estimate_resolution_limit_distl_method1(reflections, imageset, plot_filename=None):
-
     # Implementation of Method 1 (section 2.4.4) of:
     # Z. Zhang, N. K. Sauter, H. van den Bedem, G. Snell and A. M. Deacon
     # J. Appl. Cryst. (2006). 39, 112-119
@@ -365,7 +332,6 @@ def estimate_resolution_limit_distl_method1(reflections, imageset, plot_filename
     variances = reflections["intensity.sum.variance"]
 
     sel = variances > 0
-    intensities = reflections["intensity.sum.value"]
     reflections = reflections.select(sel)
     d_star_sq = flex.pow2(reflections["rlp"].norms())
     d_spacings = uctbx.d_star_sq_as_d(d_star_sq)
@@ -397,8 +363,6 @@ def estimate_resolution_limit_distl_method1(reflections, imageset, plot_filename
     p_m = flex.max_index(slopes[skip_first:]) + 1 + skip_first
 
     # (ii)
-
-    from scitbx import matrix
 
     x1 = matrix.col((0, ds3_subset[0]))
     x2 = matrix.col((p_m, ds3_subset[p_m]))
@@ -436,12 +400,11 @@ def estimate_resolution_limit_distl_method1(reflections, imageset, plot_filename
     noisiness /= (n - 1) * (n - 2) / 2
 
     if plot_filename is not None:
-        if pyplot is None:
-            raise Sorry("matplotlib must be installed to generate a plot.")
+        from matplotlib import pyplot
+
         fig = pyplot.figure()
         ax = fig.add_subplot(1, 1, 1)
         ax.scatter(range(len(ds3_subset)), ds3_subset)
-        # ax.set_xlabel('')
         ax.set_ylabel("D^-3")
         xlim = pyplot.xlim()
         ylim = pyplot.ylim()
@@ -455,7 +418,6 @@ def estimate_resolution_limit_distl_method1(reflections, imageset, plot_filename
 
 
 def estimate_resolution_limit_distl_method2(reflections, imageset, plot_filename=None):
-
     # Implementation of Method 2 (section 2.4.4) of:
     # Z. Zhang, N. K. Sauter, H. van den Bedem, G. Snell and A. M. Deacon
     # J. Appl. Cryst. (2006). 39, 112-119
@@ -464,7 +426,6 @@ def estimate_resolution_limit_distl_method2(reflections, imageset, plot_filename
     variances = reflections["intensity.sum.variance"]
 
     sel = variances > 0
-    intensities = reflections["intensity.sum.value"]
     reflections = reflections.select(sel)
     d_star_sq = flex.pow2(reflections["rlp"].norms())
     d_spacings = uctbx.d_star_sq_as_d(d_star_sq)
@@ -500,12 +461,11 @@ def estimate_resolution_limit_distl_method2(reflections, imageset, plot_filename
     noisiness /= 0.5 * m * (m - 1)
 
     if plot_filename is not None:
-        if pyplot is None:
-            raise Sorry("matplotlib must be installed to generate a plot.")
+        from matplotlib import pyplot
+
         fig = pyplot.figure()
         ax = fig.add_subplot(1, 1, 1)
         ax.scatter(range(len(bin_counts)), bin_counts)
-        # ax.set_xlabel('')
         ax.set_ylabel("number of spots in shell")
         xlim = pyplot.xlim()
         ylim = pyplot.ylim()
@@ -519,9 +479,6 @@ def estimate_resolution_limit_distl_method2(reflections, imageset, plot_filename
 
 
 def points_below_line(d_star_sq, log_i_over_sigi, m, c):
-
-    from scitbx import matrix
-
     p1 = matrix.col((0, c))
     p2 = matrix.col((1, m * 1 + c))
 
@@ -555,8 +512,6 @@ def ice_rings_selection(reflections, width=0.004):
     d_star_sq = flex.pow2(reflections["rlp"].norms())
     d_spacings = uctbx.d_star_sq_as_d(d_star_sq)
 
-    from dials.algorithms.integration import filtering
-
     unit_cell = uctbx.unit_cell((4.498, 4.498, 7.338, 90, 90, 120))
     space_group = sgtbx.space_group_info(number=194).group()
 
@@ -577,8 +532,8 @@ def resolution_histogram(reflections, imageset, plot_filename=None):
     hist = get_histogram(d_star_sq)
 
     if plot_filename is not None:
-        if pyplot is None:
-            raise Sorry("matplotlib must be installed to generate a plot.")
+        from matplotlib import pyplot
+
         fig = pyplot.figure()
         ax = fig.add_subplot(1, 1, 1)
         ax.bar(
@@ -591,14 +546,11 @@ def resolution_histogram(reflections, imageset, plot_filename=None):
 
         ax_ = ax.twiny()  # ax2 is responsible for "top" axis and "right" axis
         xticks = ax.get_xticks()
-        xlim = ax.get_xlim()
         xticks_d = [uctbx.d_star_sq_as_d(ds2) if ds2 > 0 else 0 for ds2 in xticks]
-        xticks_ = [ds2 / (xlim[1] - xlim[0]) for ds2 in xticks]
         ax_.set_xticks(xticks)
         ax_.set_xlim(ax.get_xlim())
         ax_.set_xlabel(r"Resolution ($\AA$)")
         ax_.set_xticklabels(["%.1f" % d for d in xticks_d])
-        # pyplot.show()
         pyplot.savefig(plot_filename)
         pyplot.close()
 
@@ -626,8 +578,8 @@ def log_sum_i_sigi_vs_resolution(reflections, imageset, plot_filename=None):
             slots.append(0)
 
     if plot_filename is not None:
-        if pyplot is None:
-            raise Sorry("matplotlib must be installed to generate a plot.")
+        from matplotlib import pyplot
+
         fig = pyplot.figure()
         ax = fig.add_subplot(1, 1, 1)
         # ax.bar(hist.slot_centers()-0.5*hist.slot_width(), hist.slots(),
@@ -644,21 +596,18 @@ def log_sum_i_sigi_vs_resolution(reflections, imageset, plot_filename=None):
 
         ax_ = ax.twiny()  # ax2 is responsible for "top" axis and "right" axis
         xticks = ax.get_xticks()
-        xlim = ax.get_xlim()
         xticks_d = [uctbx.d_star_sq_as_d(ds2) if ds2 > 0 else 0 for ds2 in xticks]
-        xticks_ = [ds2 / (xlim[1] - xlim[0]) for ds2 in xticks]
         ax_.set_xticks(xticks)
         ax_.set_xlim(ax.get_xlim())
         ax_.set_xlabel(r"Resolution ($\AA$)")
         ax_.set_xticklabels(["%.1f" % d for d in xticks_d])
-        # pyplot.show()
         pyplot.savefig(plot_filename)
         pyplot.close()
 
 
 def plot_ordered_d_star_sq(reflections, imageset):
-    if pyplot is None:
-        raise Sorry("matplotlib must be installed to generate a plot.")
+    from matplotlib import pyplot
+
     d_star_sq = flex.pow2(reflections["rlp"].norms())
 
     perm = flex.sort_permutation(d_star_sq)
@@ -829,7 +778,7 @@ def table(stats, perm=None, n_rows=None):
     if fraction_indexed is not None:
         rows[0].append("fraction_indexed")
     if perm is None:
-        perm = range(len(n_spots_total))
+        perm = list(range(len(n_spots_total)))
     if n_rows is not None:
         n_rows = min(n_rows, len(perm))
         perm = perm[:n_rows]
@@ -869,10 +818,7 @@ def table(stats, perm=None, n_rows=None):
 
 def print_table(stats, perm=None, n_rows=None, out=None):
     if out is None:
-        import sys
-
         out = sys.stdout
-    from libtbx import table_utils
 
     rows = table(stats, perm=perm, n_rows=n_rows)
     print(
@@ -881,6 +827,8 @@ def print_table(stats, perm=None, n_rows=None, out=None):
 
 
 def plot_stats(stats, filename="per_image_analysis.png"):
+    from matplotlib import pyplot
+
     n_spots_total = flex.int(stats.n_spots_total)
     n_spots_no_ice = stats.n_spots_no_ice
     n_spots_4A = stats.n_spots_4A
@@ -890,8 +838,7 @@ def plot_stats(stats, filename="per_image_analysis.png"):
     total_intensity = stats.total_intensity
 
     i_image = flex.int(list(range(1, len(n_spots_total) + 1)))
-    if pyplot is None:
-        raise Sorry("matplotlib must be installed to generate a plot.")
+
     _, (ax1, ax2, ax3) = pyplot.subplots(nrows=3)
     ax1.scatter(
         list(i_image),
@@ -927,7 +874,7 @@ def plot_stats(stats, filename="per_image_analysis.png"):
     ax1.set_ylim(bottom=-0.2)
     ax1.legend(bbox_to_anchor=(1.05, 0.5), loc="center left", borderaxespad=0.0)
 
-    sel = (estimated_d_min < 50.0) & (n_spots_total > 20) & (estimated_d_min > 0)  # XXX
+    sel = (estimated_d_min < 50.0) & (n_spots_total > 20) & (estimated_d_min > 0)
     ax2.scatter(
         list(i_image.select(sel)),
         list(estimated_d_min.select(sel)),

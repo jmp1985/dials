@@ -268,7 +268,7 @@ phil_scope = iotbx.phil.parse(
       .expert_level = 2
     space_group = None
       .type = str
-      .help = "Option to specify space group for scaling"
+      .help = "Option to specify space group for scaling (deprecated)"
       .expert_level = 1
     concurrent = True
       .type = bool
@@ -292,10 +292,6 @@ phil_scope = iotbx.phil.parse(
       .help = "Cutoff z-score value for identifying outliers based on their
                normalised deviation within the group of equivalent reflections"
       .expert_level = 1
-    verbosity = 2
-      .type = int(value_min=0)
-      .help = "The verbosity level"
-      .expert_level = 2
   }
   """
 )

@@ -12,8 +12,10 @@
 from __future__ import absolute_import, division, print_function
 
 import logging
+import sys
 
 from libtbx.phil import parse
+from libtbx import Auto
 
 logger = logging.getLogger("dials.command_line.export")
 
@@ -26,16 +28,16 @@ The output formats currently supported are:
 
 MTZ format exports the files as an unmerged mtz file, ready for input to
 downstream programs such as Pointless and Aimless. For exporting integrated,
-but unscaled data, the required input is an experiments.json file and an
-integrated.pickle file. For exporting scaled data, the required input is an
-experiments.json file and a scaled.pickle file, also passing the option
+but unscaled data, the required input is a models.expt file and an
+integrated.refl file. For exporting scaled data, the required input is a
+models.expt file and a scaled.pickle file, also passing the option
 intensity=scale.
 
-NXS format exports the files as an NXmx file. The required input is an
-experiments.json file and an integrated.pickle file.
+NXS format exports the files as an NXmx file. The required input is a
+models.expt file and an integrated.refl file.
 
-MMCIF format exports the files as an mmcif file. The required input is an
-experiments.json file and an integrated.pickle file.
+MMCIF format exports the files as an mmcif file. The required input is a
+models.expt file and an integrated.refl file.
 
 XDS_ASCII format exports intensity data and the experiment metadata in the
 same format as used by the output of XDS in the CORRECT step - output can
@@ -47,34 +49,34 @@ EvalCCD for input to SADABS.
 
 MOSFLM format exports the files as an index.mat mosflm-format matrix file and a
 mosflm.in file containing basic instructions for input to mosflm. The required
-input is an experiments.json file.
+input is an models.expt file.
 
-XDS format exports an experiments.json file as XDS.INP and XPARM.XDS files. If a
+XDS format exports a models.expt file as XDS.INP and XPARM.XDS files. If a
 reflection pickle is given it will be exported as a SPOT.XDS file.
 
 Examples::
 
   # Export to mtz
-  dials.export experiments.json integrated.pickle
-  dials.export experiments.json integrated.pickle mtz.hklout=integrated.mtz
-  dials.export experiments.json scaled.pickle intensity=scale mtz.hklout=scaled.mtz
+  dials.export models.expt integrated.refl
+  dials.export models.expt integrated.refl mtz.hklout=integrated.mtz
+  dials.export models.expt scaled.pickle intensity=scale mtz.hklout=scaled.mtz
 
   # Export to nexus
-  dials.export experiments.json integrated.pickle format=nxs
-  dials.export experiments.json integrated.pickle format=nxs nxs.hklout=integrated.nxs
+  dials.export models.expt integrated.refl format=nxs
+  dials.export models.expt integrated.refl format=nxs nxs.hklout=integrated.nxs
 
   # Export to mmcif
-  dials.export experiments.json integrated.pickle format=mmcif
-  dials.export experiments.json integrated.pickle format=mmcif mmcif.hklout=integrated.mmcif
+  dials.export models.expt integrated.refl format=mmcif
+  dials.export models.expt integrated.refl format=mmcif mmcif.hklout=integrated.mmcif
 
   # Export to mosflm
-  dials.export experiments.json integrated.pickle format=mosflm
+  dials.export models.expt integrated.refl format=mosflm
 
   # Export to xds
   dials.export strong.pickle format=xds
   dials.export indexed.pickle format=xds
-  dials.export experiments.json format=xds
-  dials.export experiments.json indexed.pickle format=xds
+  dials.export models.expt format=xds
+  dials.export models.expt indexed.pickle format=xds
 
 """
 
@@ -85,10 +87,12 @@ phil_scope = parse(
     .type = choice
     .help = "The output file format"
 
-  intensity = *profile *sum scale
+  intensity = *auto profile sum scale
     .type = choice(multi=True)
     .help = "Choice of which intensities to export. Allowed combinations:
-            scale, profile, sum, profile+sum, sum+profile+scale."
+            scale, profile, sum, profile+sum, sum+profile+scale. Auto will
+            default to scale or profile+sum depending on if the data are scaled."
+
 
   debug = False
     .type = bool
@@ -128,9 +132,10 @@ phil_scope = parse(
       .type = float
       .help = "Filter out reflections with d-spacing below d_min"
 
-    hklout = integrated.mtz
+    hklout = auto
       .type = path
-      .help = "The output MTZ file"
+      .help = "The output MTZ filename, defaults to integrated.mtz or scaled_unmerged.mtz"
+              "depending on if the input data are scaled."
 
     crystal_name = XTAL
       .type = str
@@ -169,9 +174,10 @@ phil_scope = parse(
 
   mmcif {
 
-    hklout = integrated.cif
+    hklout = auto
       .type = path
-      .help = "The output CIF file"
+      .help = "The output CIF file, defaults to integrated.cif or scaled_unmerged.cif
+        depending on if the data are scaled."
 
   }
 
@@ -271,7 +277,7 @@ class MTZExporter(object):
         """
 
         # Check the input
-        if len(experiments) == 0:
+        if not experiments:
             raise Sorry("MTZ exporter requires an experiment list")
         if len(reflections) != 1:
             raise Sorry("MTZ exporter requires 1 reflection table")
@@ -288,7 +294,10 @@ class MTZExporter(object):
         """
         from dials.util.export_mtz import export_mtz
 
-        m = export_mtz(self.reflections, self.experiments, self.params)
+        try:
+            m = export_mtz(self.reflections, self.experiments, self.params)
+        except ValueError as e:
+            raise Sorry(e)
         from six.moves import cStringIO as StringIO
 
         summary = StringIO()
@@ -314,7 +323,7 @@ class SadabsExporter(object):
         """
 
         # Check the input
-        if len(experiments) == 0:
+        if not experiments:
             raise Sorry("SADABS exporter requires an experiment list")
         if len(reflections) != 1:
             raise Sorry("SADABS exporter requires 1 reflection table")
@@ -327,7 +336,25 @@ class SadabsExporter(object):
     def export(self):
         from dials.util.export_sadabs import export_sadabs
 
-        export_sadabs(self.reflections, self.experiments, self.params)
+        if not "profile" in params.intensity and not "sum" in params.intensity:
+            raise Sorry(
+                """Only intensity options containing sum or profile are compatible with
+export to sadabs format."""
+            )
+        if not any(
+            [
+                i in self.reflections
+                for i in ["intensity.sum.value", "intensity.prf.value"]
+            ]
+        ):
+            raise Sorry(
+                """Unable to find 'intensity.sum.value' or 'intensity.prf.value'
+columns in reflection table."""
+            )
+        try:
+            export_sadabs(self.reflections, self.experiments, self.params)
+        except ValueError as e:
+            raise Sorry(e)
 
 
 class XDSASCIIExporter(object):
@@ -347,7 +374,7 @@ class XDSASCIIExporter(object):
         """
 
         # Check the input
-        if len(experiments) == 0:
+        if not experiments:
             raise Sorry("XDS_ASCII exporter requires an experiment list")
         if len(reflections) != 1:
             raise Sorry("XDS_ASCII exporter requires 1 reflection table")
@@ -360,7 +387,25 @@ class XDSASCIIExporter(object):
     def export(self):
         from dials.util.export_xds_ascii import export_xds_ascii
 
-        export_xds_ascii(self.reflections, self.experiments, self.params)
+        if not "profile" in params.intensity and not "sum" in params.intensity:
+            raise Sorry(
+                """Only intensity options containing sum or profile are compatible with
+export to xds_ascii format."""
+            )
+        if not any(
+            [
+                i in self.reflections
+                for i in ["intensity.sum.value", "intensity.prf.value"]
+            ]
+        ):
+            raise Sorry(
+                """Unable to find 'intensity.sum.value' or 'intensity.prf.value'
+columns in reflection table."""
+            )
+        try:
+            export_xds_ascii(self.reflections, self.experiments, self.params)
+        except ValueError as e:
+            raise Sorry(e)
 
 
 class NexusExporter(object):
@@ -380,7 +425,7 @@ class NexusExporter(object):
         """
 
         # Check the input
-        if len(experiments) == 0:
+        if not experiments:
             raise Sorry("Nexus exporter requires an experiment list")
         if len(reflections) != 1:
             raise Sorry("Nexus exporter requires 1 reflection table")
@@ -417,7 +462,7 @@ class MMCIFExporter(object):
         """
 
         # Check the input
-        if len(experiments) == 0:
+        if not experiments:
             raise Sorry("CIF exporter requires an experiment list")
         if len(reflections) != 1:
             raise Sorry("CIF exporter requires 1 reflection table")
@@ -435,7 +480,10 @@ class MMCIFExporter(object):
         from dials.util.export_mmcif import MMCIFOutputFile
 
         outfile = MMCIFOutputFile(self.params)
-        outfile.write(self.experiments, self.reflections)
+        try:
+            outfile.write(self.experiments, self.reflections)
+        except ValueError as e:
+            raise Sorry(e)
 
 
 class MosflmExporter(object):
@@ -455,9 +503,9 @@ class MosflmExporter(object):
         """
 
         # Check the input
-        if len(experiments) == 0:
+        if not experiments:
             raise Sorry("Mosflm exporter requires an experiment list")
-        if len(reflections) != 0:
+        if reflections:
             raise Sorry("Mosflm exporter does not need a reflection table")
 
         # Save the stuff
@@ -489,6 +537,7 @@ class XDSExporter(object):
         :param reflections: The reflection tables
 
         """
+        self.reflections = None
 
         # Check the input
         if len(reflections) > 1:
@@ -497,9 +546,8 @@ class XDSExporter(object):
         # Save the stuff
         self.params = params
         self.experiments = experiments
-        if len(reflections) == 0:
-            self.reflections = reflections
-        else:
+
+        if reflections:
             self.reflections = reflections[0]
 
     def export(self):
@@ -529,9 +577,9 @@ class BestExporter(object):
         """
 
         # Check the input
-        if len(experiments) == 0:
+        if not experiments:
             raise Sorry("BEST exporter requires an experiment list")
-        if len(reflections) == 0:
+        if not reflections:
             raise Sorry("BEST exporter require a reflection table")
 
         # Save the stuff
@@ -551,8 +599,10 @@ class BestExporter(object):
         partiality = reflections["partiality"]
         sel = partiality >= self.params.best.min_partiality
         logger.info(
-            "Selecting %s/%s reflections with partiality >= %s"
-            % (sel.count(True), sel.size(), self.params.best.min_partiality)
+            "Selecting %s/%s reflections with partiality >= %s",
+            sel.count(True),
+            sel.size(),
+            self.params.best.min_partiality,
         )
         if sel.count(True) == 0:
             raise Sorry(
@@ -590,7 +640,7 @@ class JsonExporter(object):
         # Check the input
         if experiments is None:
             raise Sorry("json exporter requires an experiment list")
-        if len(reflections) == 0:
+        if not reflections:
             raise Sorry("json exporter require a reflection table")
 
         # Save the stuff
@@ -613,41 +663,34 @@ class JsonExporter(object):
             len(self.reflections),
             len(imagesets),
         )
-        for i, (refl, imgset) in enumerate(zip(self.reflections, imagesets)):
+        for i, refl in enumerate(self.reflections):
             refl["imageset_id"] = flex.size_t(refl.size(), i)
             if reflections is None:
                 reflections = refl
             else:
                 reflections.extend(refl)
 
-        settings = self.params
-        settings.__inject__("beam_centre", None)
-        settings.__inject__("reverse_phi", None)
-
-        exporter = export_json.ReciprocalLatticeJson(settings=self.params)
-        exporter.load_models(imagesets, reflections)
+        exporter = export_json.ReciprocalLatticeJson(self.experiments, reflections)
         exporter.as_json(
             filename=params.json.filename,
             compact=params.json.compact,
             n_digits=params.json.n_digits,
-            experiments=experiments,
+            experiments=self.experiments,
         )
 
 
 if __name__ == "__main__":
-    import libtbx.load_env
-    from dials.util.options import OptionParser
-    from dials.util.options import flatten_experiments
-    from dials.util.options import flatten_experiments
-    from dials.util.options import flatten_reflections
+    from dials.util.options import (
+        OptionParser,
+        flatten_experiments,
+        flatten_reflections,
+    )
     from dials.util.version import dials_version
     from dials.util import log
     from dials.util import Sorry
     import os
 
-    usage = "%s experiments.json reflections.pickle [options]" % (
-        libtbx.env.dispatcher_name
-    )
+    usage = "dials.export models.expt reflections.pickle [options]"
 
     # Create the option parser
     if os.getenv("DIALS_EXPORT_DO_NOT_CHECK_FORMAT"):
@@ -681,18 +724,30 @@ if __name__ == "__main__":
 
     # Log the diff phil
     diff_phil = parser.diff_phil.as_str()
-    if diff_phil is not "":
+    if diff_phil != "":
         logger.info("The following parameters have been modified:\n")
         logger.info(diff_phil)
 
+    if not params.input.experiments and not params.input.reflections:
+        parser.print_help()
+        sys.exit()
+
     # Get the experiments and reflections
     experiments = flatten_experiments(params.input.experiments)
-
-    experiments = flatten_experiments(params.input.experiments)
     reflections = flatten_reflections(params.input.reflections)
-    if len(reflections) == 0 and len(experiments) == 0:
-        parser.print_help()
-        exit(0)
+
+    # do auto intepreting of intensity choice:
+    # note that this may still fail certain checks further down the processing,
+    # but these are the defaults to try
+    if params.intensity in ([None], [Auto], ["auto"]) and reflections:
+        if ("intensity.scale.value" in reflections[0]) and (
+            "intensity.scale.variance" in reflections[0]
+        ):
+            params.intensity = ["scale"]
+            logger.info("Data appears to be scaled, setting intensity = scale")
+        else:
+            params.intensity = ["profile", "sum"]
+            logger.info("Data appears to be unscaled, setting intensity = profile+sum")
 
     # Choose the exporter
     if params.format == "mtz":

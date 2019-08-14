@@ -48,16 +48,6 @@ def test(args=[]):
     from dials.algorithms.spot_prediction import ray_intersection
     from cctbx.sgtbx import space_group, space_group_symbols
 
-    # Parameterisation of the prediction equation
-    from dials.algorithms.refinement.parameterisation.prediction_parameters import (
-        XYPhiPredictionParameterisation,
-    )  # implicit import
-
-    # Imports for the target function
-    from dials.algorithms.refinement.target import (
-        LeastSquaresPositionalResidualWithRmsdCutoff,
-    )  # implicit import
-
     #############################
     # Setup experimental models #
     #############################
@@ -95,7 +85,7 @@ def test(args=[]):
         image_range=(1, 1800),
         exposure_times=0.1,
         oscillation=(0, 0.1),
-        epochs=range(1800),
+        epochs=list(range(1800)),
         deg=True,
     )
     sweep_range = myscan.get_oscillation_range(deg=False)
@@ -226,7 +216,7 @@ def test(args=[]):
     ray_predictor = ScansRayPredictor(experiments, sweep_range)
     obs_refs1 = ray_predictor(indices1, experiment_id=0)
     obs_refs1["id"] = flex.int(len(obs_refs1), 0)
-    obs_refs2 = ray_predictor(indices1, experiment_id=1)
+    obs_refs2 = ray_predictor(indices2, experiment_id=1)
     obs_refs2["id"] = flex.int(len(obs_refs2), 1)
 
     # Take only those rays that intersect the detector
@@ -292,22 +282,19 @@ def test(args=[]):
     from dials.algorithms.refinement.refiner import RefinerFactory
 
     refiner = RefinerFactory.from_parameters_data_experiments(
-        params, obs_refs, experiments, verbosity=0
+        params, obs_refs, experiments
     )
-    history = refiner.run()
+    refiner.run()
 
     # scan varying
     params.refinement.parameterisation.scan_varying = True
     refiner = RefinerFactory.from_parameters_data_experiments(
-        params, obs_refs, experiments, verbosity=0
+        params, obs_refs, experiments
     )
-    history = refiner.run()
+    refiner.run()
 
-    # plt = refiner.parameter_correlation_plot(len(history["parameter_correlation"])-1)
-    # plt.show()
-
-    # print "Refinement has completed with the following geometry:"
-    # expts = refiner.get_experiments()
-    # for beam in expts.beams(): print beam
-    # for detector in expts.detectors(): print detector
-    # for crystal in  expts.crystals(): print crystal
+    # Ensure all models have scan-varying state set
+    # (https://github.com/dials/dials/issues/798)
+    refined_experiments = refiner.get_experiments()
+    sp = [xl.get_num_scan_points() for xl in refined_experiments.crystals()]
+    assert sp.count(1801) == 2

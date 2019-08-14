@@ -8,7 +8,6 @@ import logging
 from collections import OrderedDict
 
 from dials.array_family import flex
-from dials.util import Sorry
 import six
 
 logger = logging.getLogger("dials")
@@ -81,7 +80,7 @@ class active_parameter_manager(object):
         """Set var_cov matrices for each component to allow later calculation
         of errors."""
         i = 0
-        for component in self.components.itervalues():
+        for component in self.components.values():
             n = component["n_params"]
             sub = var_cov.matrix_copy_block(i, i, n, n)
             component["object"].var_cov_matrix = sub
@@ -90,7 +89,7 @@ class active_parameter_manager(object):
 
     def set_param_esds(self, esds):
         """Set the estimated standard deviations of the model components."""
-        for component in self.components.itervalues():
+        for component in self.components.values():
             start_idx = component["start_idx"]
             end_idx = component["end_idx"]
             component["object"].parameter_esds = esds[start_idx:end_idx]
@@ -112,11 +111,8 @@ class multi_active_parameter_manager(object):
         self.components_list = []  # A list of the component names.
         self.apm_list = []
         self.apm_data = OrderedDict()
-        verbosity = 1
-        if len(selection_lists) > 4:
-            verbosity -= 1
         all_same_components = False
-        if all(i == selection_lists[0] for i in selection_lists):
+        if all(i == selection_lists[0] for i in selection_lists[1:]):
             logger.info(
                 "Components to be refined in this cycle for all datasets: %s",
                 "".join(str(i) + ", " for i in selection_lists[0]).rstrip(", "),
@@ -126,7 +122,7 @@ class multi_active_parameter_manager(object):
             zip(components_list, selection_lists)
         ):
             self.apm_list.append(apm_class(components, selection_list))
-            if verbosity or not all_same_components:
+            if not all_same_components:
                 logger.info(
                     "Components to be refined in this cycle for datasest %s: %s",
                     j,
@@ -214,7 +210,9 @@ class ConcurrentAPMFactory(object):
             for param in self.data_managers[0].components:
                 param_name.append(str(param))
             if not param_name:
-                raise Sorry("No model components have been chosen, aborting process.")
+                raise ValueError(
+                    "No model components have been chosen, aborting process."
+                )
             self.param_lists = param_name
             self.apm = apm_type(self.data_managers[0].components, self.param_lists)
 
@@ -224,7 +222,7 @@ class ConcurrentAPMFactory(object):
                 for param in data_manager.components:
                     param_name.append(str(param))
                 if not param_name:
-                    raise Sorry(
+                    raise ValueError(
                         "No model components have been chosen, aborting process."
                     )
                 self.param_lists.append(param_name)

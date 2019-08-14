@@ -26,8 +26,8 @@ def test_simple(dials_data, model, tmpdir):
     path = dials_data("centroid_test_data")
     experiments = path.join("experiments.json")
 
-    reflns_simple = tmpdir.join("simple").join("reflections.pickle")
-    reflns_g_simple = tmpdir.join("gmodel_simple").join("reflections.pickle")
+    reflns_simple = tmpdir.join("simple").join("observations.refl")
+    reflns_g_simple = tmpdir.join("gmodel_simple").join("observations.refl")
     reflns_simple.dirpath().ensure(dir=1)
     reflns_g_simple.dirpath().ensure(dir=1)
 
@@ -42,7 +42,7 @@ def test_simple(dials_data, model, tmpdir):
         ],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
     assert reflns_simple.check()
 
     result = procrunner.run(
@@ -57,7 +57,7 @@ def test_simple(dials_data, model, tmpdir):
         ],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
     assert reflns_g_simple.check()
 
     from dials.array_family import flex
@@ -86,8 +86,8 @@ def test_robust(dials_data, model, tmpdir):
     path = dials_data("centroid_test_data")
     experiments = path.join("experiments.json")
 
-    reflns_robust = tmpdir.join("robust").join("reflections.pickle")
-    reflns_g_robust = tmpdir.join("gmodel_robust").join("reflections.pickle")
+    reflns_robust = tmpdir.join("robust").join("observations.refl")
+    reflns_g_robust = tmpdir.join("gmodel_robust").join("observations.refl")
     reflns_robust.dirpath().ensure(dir=1)
     reflns_g_robust.dirpath().ensure(dir=1)
 
@@ -101,7 +101,7 @@ def test_robust(dials_data, model, tmpdir):
         ],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
     assert reflns_robust.check()
 
     result = procrunner.run(
@@ -116,7 +116,7 @@ def test_robust(dials_data, model, tmpdir):
         ],
         working_directory=tmpdir.strpath,
     )
-    assert not result["exitcode"] and not result["stderr"]
+    assert not result.returncode and not result.stderr
     assert reflns_g_robust.check()
 
     from dials.array_family import flex
@@ -135,5 +135,4 @@ def test_robust(dials_data, model, tmpdir):
     mean_bg2 = integrated2["background.mean"]
     mean_bg4 = integrated4["background.mean"]
     scale4 = integrated4["background.scale"]
-    diff2 = flex.abs(mean_bg2 - mean_bg4)
     assert (scale4 > 0).count(False) == 0

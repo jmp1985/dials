@@ -63,7 +63,7 @@ class seed_clustering(object):
             return
 
         dist_mat, linkage_matrix = self._hierarchical_clustering()
-        self.cluster_labels, threshold = self._silhouette_analysis(
+        self.cluster_labels, _ = self._silhouette_analysis(
             self.cluster_labels,
             linkage_matrix,
             n_clusters=n_clusters,
@@ -154,7 +154,6 @@ class seed_clustering(object):
         cluster_centroids = []
         X = self.coords.as_numpy_array()
         for i in set(self.cluster_labels):
-            sel = self.cluster_labels == i
             cluster_centroids.append(
                 X[(self.cluster_labels == i).iselection().as_numpy_array()].mean(axis=0)
             )
@@ -252,7 +251,9 @@ class seed_clustering(object):
             labels = hierarchy.fcluster(linkage_matrix, threshold, criterion="distance")
             cluster_labels = flex.double(cluster_labels.size(), -1)
             for i in range(len(labels)):
-                cluster_labels.set_selected(cluster_labels_input == i, labels[i] - 1)
+                cluster_labels.set_selected(
+                    cluster_labels_input == i, float(labels[i] - 1)
+                )
 
         return cluster_labels, threshold
 

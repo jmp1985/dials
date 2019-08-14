@@ -23,9 +23,10 @@ from cctbx import uctbx
 import dials.util.banner  # noqa: F401 - Importing means that it prints
 from dials.array_family import flex
 from dials.algorithms.scaling.scaling_library import (
-    calculate_single_merging_stats,
+    merging_stats_from_scaled_array,
     scaled_data_as_miller_array,
 )
+from dials.algorithms.scaling.scaling_utilities import DialsMergingStatisticsError
 from dials.algorithms.scaling.plots import plot_scaling_models
 from dials.report.analysis import combined_table_to_batch_dependent_properties
 from dials.report.plots import (
@@ -45,21 +46,21 @@ RAD2DEG = 180 / math.pi
 help_message = """
 
 Generates a html report given the output of various DIALS programs
-(reflections.pickle and/or experiments.json).
+(observations.refl and/or models.expt).
 
 Examples::
 
-  dials.report strong.pickle
+  dials.report strong.refl
 
-  dials.report indexed.pickle
+  dials.report indexed.refl
 
-  dials.report refined.pickle
+  dials.report refined.refl
 
-  dials.report integrated.pickle
+  dials.report integrated.refl
 
-  dials.report refined_experiments.json
+  dials.report refined.expt
 
-  dials.report integrated.pickle integrated_experiments.json
+  dials.report integrated.refl integrated.expt
 
 """
 
@@ -198,7 +199,7 @@ class ScanVaryingCrystalAnalyser(object):
                 print("Ignoring scan-static crystal")
                 continue
 
-            scan_pts = range(crystal.num_scan_points)
+            scan_pts = list(range(crystal.num_scan_points))
             cells = [crystal.get_unit_cell_at_scan_point(t) for t in scan_pts]
             cell_params = [e.parameters() for e in cells]
             a, b, c, aa, bb, cc = zip(*cell_params)
@@ -218,7 +219,7 @@ class ScanVaryingCrystalAnalyser(object):
                 "volume": vol,
             }
             if self._debug:
-                print("Crystal in Experiment {0}".format(iexp))
+                print("Crystal in Experiment {}".format(iexp))
                 print("Phi\ta\tb\tc\talpha\tbeta\tgamma\tVolume")
                 msg = "{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}"
                 line_dat = zip(phi, a, b, c, aa, bb, cc, vol)
@@ -246,6 +247,14 @@ class ScanVaryingCrystalAnalyser(object):
                     "yaxis2": {"domain": [0.55, 0.75], "anchor": "x", "nticks": 3},
                     "yaxis": {"domain": [0.8, 1], "nticks": 3},
                 },
+                "help": """\
+A plot of the smoothly-varying unit cell parameters determined by scan-varying
+refinement. Small variations up to ~1% of the linear cell dimensions are not
+uncommon. Especially in cases of radiation damage, an increase of cell volume
+with respect to dose is often seen. Multi-turn scans typically show some
+oscillatory behaviour. This is not expected to be physically real, but indicates
+the refinement algorithm accounting for unmodelled features in the data.
+""",
             }
         }
 
@@ -333,7 +342,7 @@ class ScanVaryingCrystalAnalyser(object):
                 print("Ignoring scan-static crystal")
                 continue
 
-            scan_pts = range(crystal.num_scan_points)
+            scan_pts = list(range(crystal.num_scan_points))
             phi = [scan.get_angle_from_array_index(t) for t in scan_pts]
             Umats = [matrix.sqr(crystal.get_U_at_scan_point(t)) for t in scan_pts]
             if self._relative_to_static_orientation:
@@ -352,7 +361,7 @@ class ScanVaryingCrystalAnalyser(object):
             phi3, phi2, phi1 = zip(*angles)
             angle_dat = {"phi": phi, "phi3": phi3, "phi2": phi2, "phi1": phi1}
             if self._debug:
-                print("Crystal in Experiment {0}".format(iexp))
+                print("Crystal in Experiment {}".format(iexp))
                 print("Image\tphi3\tphi2\tphi1")
                 msg = "{0}\t{1}\t{2}\t{3}"
                 line_dat = zip(phi, phi3, phi2, phi1)
@@ -376,6 +385,16 @@ class ScanVaryingCrystalAnalyser(object):
                     "yaxis2": {"domain": [0.35, 0.65], "anchor": "x2"},
                     "yaxis": {"domain": [0.7, 1]},
                 },
+                "help": """\
+A plot of the smoothly-varying crystal orientation parameters determined by
+scan-varying refinement. By default, the crystal orientation matrix is
+decomposed into rotations along the orthogonal axes of the laboratory frame.
+Alternate axes may be chosen as parameters to the program. Small variations of
+a few tenths of a degree are not uncommon. Larger changes may indicate a
+problem with the model geometry. Monotonic drift along the axis closest to the
+rotation axis may indicate that the goniometer rotation speed is recorded
+incorrectly.
+""",
             }
         }
 
@@ -2068,23 +2087,24 @@ class ScalingModelAnalyser(object):
                 if model is not None:
                     if model.id_ == "physical":
                         scaling_model_plots = plot_scaling_models(model.to_dict())
-                        for name, plot in scaling_model_plots.iteritems():
+                        for name, plot in scaling_model_plots.items():
                             d.update({name + "_" + str(i): plot})
         return {"scaling_model": d}
 
 
 def merging_stats_results(reflections, experiments):
-    if not "inverse_scale_factor" in reflections:
+    if "inverse_scale_factor" not in reflections:
         return [], [], {}, {}
 
     reflections["intensity"] = reflections["intensity.scale.value"]
     reflections["variance"] = reflections["intensity.scale.variance"]
-    result = calculate_single_merging_stats(
-        reflections, experiments[0], use_internal_variance=False
-    )
-    anom_result = calculate_single_merging_stats(
-        reflections, experiments[0], use_internal_variance=False, anomalous=True
-    )
+    scaled_array = scaled_data_as_miller_array([reflections], experiments)
+    try:
+        result, anom_result = merging_stats_from_scaled_array(scaled_array)
+    except DialsMergingStatisticsError as e:
+        print(e)
+        return [], [], {}, {}
+
     is_centric = experiments[0].crystal.get_space_group().is_centric()
 
     resolution_plots = OrderedDict()
@@ -2106,7 +2126,7 @@ def merging_stats_results(reflections, experiments):
 
 
 def intensity_statistics(reflections, experiments):
-    if not "inverse_scale_factor" in reflections:
+    if "inverse_scale_factor" not in reflections:
         return {}, {}, {}
     reflections["intensity"] = reflections["intensity.scale.value"]
     reflections["variance"] = reflections["intensity.scale.variance"]
@@ -2403,10 +2423,9 @@ class Script(object):
     def __init__(self):
         """ Initialise the script. """
         from dials.util.options import OptionParser
-        import libtbx.load_env
 
         # Create the parser
-        usage = "usage: %s [options] reflections.pickle" % libtbx.env.dispatcher_name
+        usage = "usage: dials.report [options] observations.refl"
         self.parser = OptionParser(
             usage=usage,
             phil=phil_scope,
@@ -2427,8 +2446,6 @@ class Script(object):
         if len(params.input.reflections) != 1 and not len(params.input.experiments):
             self.parser.print_help()
             exit(0)
-
-        from dials.util.options import flatten_reflections, flatten_experiments
 
         reflections = flatten_reflections(params.input.reflections)
         experiments = flatten_experiments(params.input.experiments)

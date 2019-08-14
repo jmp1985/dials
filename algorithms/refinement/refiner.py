@@ -14,17 +14,18 @@
 what should usually be used to construct a Refiner."""
 
 from __future__ import absolute_import, division, print_function
+
 import copy
 import logging
-
-logger = logging.getLogger(__name__)
+import math
 
 from dxtbx.model.experiment_list import ExperimentList
 from dials.array_family import flex
 from dials.algorithms.refinement.refinement_helpers import ordinal_number
 from libtbx.phil import parse
-from dials.util import Sorry
+from dials.algorithms.refinement import DialsRefineConfigError
 import libtbx
+from libtbx.introspection import machine_memory_info
 
 # The include scope directive does not work here. For example:
 #
@@ -43,6 +44,8 @@ from dials.algorithms.refinement.parameterisation import (
     phil_str as parameterisation_phil_str,
 )
 from dials.algorithms.refinement.engine import refinery_phil_str
+
+logger = logging.getLogger(__name__)
 
 format_data = {
     "reflections_phil": reflections_phil_str,
@@ -66,11 +69,6 @@ refinement
               "it is helpful only in certain circumstances, so this is not"
               "recommended for typical use."
   }
-
-  verbosity = 0
-    .help = "verbosity level"
-    .type = int(value_min=0)
-    .expert_level = 1
 
   parameterisation
     .help = "Parameters to control the parameterisation of experimental models"
@@ -98,6 +96,8 @@ refinement
     % format_data,
     process_includes=True,
 )
+
+RAD2DEG = 180 / math.pi
 
 
 def _copy_experiments_for_refining(experiments):
@@ -174,7 +174,7 @@ class RefinerFactory(object):
         # for this except that 's1' is optional in the input so would want
         # to copy that in like this if present anyway
         for k in cols:
-            if k in reflections.keys():
+            if k in reflections:
                 rt[k] = reflections[k]
 
         return rt
@@ -184,14 +184,19 @@ class RefinerFactory(object):
         cls, params, reflections, experiments, verbosity=None
     ):
 
+        if verbosity is not None:
+            import warnings
+
+            warnings.warn(
+                "Setting verbosity for a Refiner is deprecated. See https://github.com/dials/dials/issues/860",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         # TODO Checks on the input
         # E.g. does every experiment contain at least one overlapping model with at
         # least one other experiment? Are all the experiments either rotation series
         # or stills (the combination of both not yet supported)?
-
-        # if no verbosity override is given, take from the parameters
-        if verbosity is None:
-            verbosity = params.refinement.verbosity
 
         # copy the experiments
         experiments = _copy_experiments_for_refining(experiments)
@@ -199,16 +204,11 @@ class RefinerFactory(object):
         # copy and filter the reflections
         reflections = cls._filter_reflections(reflections)
 
-        return cls._build_components(
-            params, reflections, experiments, verbosity=verbosity
-        )
+        return cls._build_components(params, reflections, experiments)
 
     @classmethod
-    def _build_components(cls, params, reflections, experiments, verbosity):
+    def _build_components(cls, params, reflections, experiments):
         """low level build"""
-
-        if verbosity == 0:
-            logging.getLogger("dials.algorithms.refinement").setLevel(logging.WARNING)
 
         # Currently a refinement job can only have one parameterisation of the
         # prediction equation. This can either be of the XYDelPsi (stills) type, the
@@ -228,13 +228,22 @@ class RefinerFactory(object):
                     exps_are_stills.append(False)
             else:
                 if exp.scan.get_oscillation()[1] <= 0.0:
-                    raise Sorry("Cannot refine a zero-width scan")
+                    raise DialsRefineConfigError("Cannot refine a zero-width scan")
                 exps_are_stills.append(False)
 
         # check experiment types are consistent
         if not all(exps_are_stills[0] == e for e in exps_are_stills):
-            raise Sorry("Cannot refine a mixture of stills and scans")
+            raise DialsRefineConfigError("Cannot refine a mixture of stills and scans")
         do_stills = exps_are_stills[0]
+
+        # If experiments are stills, ensure scan-varying refinement won't be attempted
+        if do_stills:
+            params.refinement.parameterisation.scan_varying = False
+
+        # Refiner does not accept scan_varying=Auto. This is a special case for
+        # doing macrocycles of refinement in dials.refine.
+        if params.refinement.parameterisation.scan_varying is libtbx.Auto:
+            params.refinement.parameterisation.scan_varying = False
 
         # calculate reflection block_width if required for scan-varying refinement
         if params.refinement.parameterisation.scan_varying:
@@ -257,11 +266,7 @@ class RefinerFactory(object):
         )
 
         refman = ReflectionManagerFactory.from_parameters_reflections_experiments(
-            params.refinement.reflections,
-            reflections,
-            experiments,
-            do_stills,
-            verbosity,
+            params.refinement.reflections, reflections, experiments, do_stills
         )
 
         logger.debug(
@@ -329,7 +334,7 @@ class RefinerFactory(object):
         # Build a constraints manager, if requested
         from dials.algorithms.refinement.constraints import ConstraintManagerFactory
 
-        cmf = ConstraintManagerFactory(params, pred_param, verbosity)
+        cmf = ConstraintManagerFactory(params, pred_param)
         constraints_manager = cmf()
 
         # Create target function
@@ -348,10 +353,36 @@ class RefinerFactory(object):
 
         # create refinery
         logger.debug("Building refinement engine")
-        refinery = cls.config_refinery(
-            params, target, pred_param, constraints_manager, verbosity
-        )
+        refinery = cls.config_refinery(params, target, pred_param, constraints_manager)
         logger.debug("Refinement engine built")
+
+        nparam = len(pred_param)
+        ndim = target.dim
+        nref = len(refman.get_matches())
+        logger.info(
+            "There are {0} parameters to refine against {1} reflections in {2} dimensions".format(
+                nparam, nref, ndim
+            )
+        )
+        from dials.algorithms.refinement.engine import AdaptLstbx
+
+        if not params.refinement.parameterisation.sparse and isinstance(
+            refinery, AdaptLstbx
+        ):
+            dense_jacobian_gigabytes = (
+                nparam * nref * ndim * flex.double.element_size()
+            ) / 1e9
+            tot_memory_gigabytes = machine_memory_info().memory_total() / 1e9
+            # Report if the Jacobian requires a large amount of storage
+            if (
+                dense_jacobian_gigabytes > 0.2 * tot_memory_gigabytes
+                or dense_jacobian_gigabytes > 0.5
+            ):
+                logger.info(
+                    "Storage of the Jacobian matrix requires {:.1f} GB".format(
+                        dense_jacobian_gigabytes
+                    )
+                )
 
         # build refiner interface and return
         if params.refinement.parameterisation.scan_varying:
@@ -359,14 +390,7 @@ class RefinerFactory(object):
         else:
             refiner = Refiner
         return refiner(
-            reflections,
-            experiments,
-            pred_param,
-            param_reporter,
-            refman,
-            target,
-            refinery,
-            verbosity=verbosity,
+            experiments, pred_param, param_reporter, refman, target, refinery
         )
 
     @staticmethod
@@ -391,7 +415,7 @@ class RefinerFactory(object):
             params.refinement.parameterisation.sparse and params.refinement.mp.nproc > 1
         ):
             logger.warning(
-                "Could not set sparse=True and nproc={0}".format(
+                "Could not set sparse=True and nproc={}".format(
                     params.refinement.mp.nproc
                 )
             )
@@ -444,6 +468,9 @@ class RefinerFactory(object):
             ]
         ):
             return None
+        if params.scan_varying:
+            logger.warning("Restraints will be ignored for scan_varying=True")
+            return None
 
         det_params = pred_param.get_detector_parameterisations()
         beam_params = pred_param.get_beam_parameterisations()
@@ -470,11 +497,11 @@ class RefinerFactory(object):
 
         for tie in cell_r.tie_to_target:
             if len(tie.values) != 6:
-                raise Sorry(
+                raise DialsRefineConfigError(
                     "6 cell parameters must be provided as the tie_to_target.values."
                 )
             if len(tie.sigmas) != 6:
-                raise Sorry(
+                raise DialsRefineConfigError(
                     "6 sigmas must be provided as the tie_to_target.sigmas. "
                     "Note that individual sigmas of 0.0 will remove "
                     "the restraint for the corresponding cell parameter."
@@ -487,7 +514,7 @@ class RefinerFactory(object):
 
         for tie in cell_r.tie_to_group:
             if len(tie.sigmas) != 6:
-                raise Sorry(
+                raise DialsRefineConfigError(
                     "6 sigmas must be provided as the tie_to_group.sigmas. "
                     "Note that individual sigmas of 0.0 will remove "
                     "the restraint for the corresponding cell parameter."
@@ -500,7 +527,7 @@ class RefinerFactory(object):
         return rp
 
     @staticmethod
-    def config_refinery(params, target, pred_param, constraints_manager, verbosity):
+    def config_refinery(params, target, pred_param, constraints_manager):
         """Given a set of parameters, a target class, a prediction
         parameterisation class and a constraints_manager (which could be None),
         build a refinery
@@ -543,7 +570,6 @@ class RefinerFactory(object):
             prediction_parameterisation=pred_param,
             constraints_manager=constraints_manager,
             log=options.log,
-            verbosity=verbosity,
             tracking=options.journal,
             max_iterations=options.max_iterations,
         )
@@ -617,28 +643,16 @@ class Refiner(object):
     """
 
     def __init__(
-        self,
-        reflections,
-        experiments,
-        pred_param,
-        param_reporter,
-        refman,
-        target,
-        refinery,
-        verbosity=0,
+        self, experiments, pred_param, param_reporter, refman, target, refinery
     ):
         """
         Mandatory arguments:
-          reflections - Input ReflectionList data
           experiments - a dxtbx ExperimentList object
           pred_param - An object derived from the PredictionParameterisation class
           param_reporter -A ParameterReporter object
           refman - A ReflectionManager object
           target - An object derived from the Target class
           refinery - An object derived from the Refinery class
-
-        Optional arguments:
-          verbosity - An integer verbosity level
 
         """
 
@@ -654,7 +668,8 @@ class Refiner(object):
         # parameter reporter
         self._param_report = param_reporter
 
-        self._verbosity = verbosity
+        # Keep track of whether this is stills or scans type refinement
+        self.experiment_type = refman.experiment_type
 
         return
 
@@ -709,18 +724,16 @@ class Refiner(object):
         from dials.algorithms.refinement.refinement_helpers import string_sel
 
         if col_select is None:
-            col_select = range(len(all_labels))
+            col_select = list(range(len(all_labels)))
         sel = string_sel(col_select, all_labels)
         labels = [e for e, s in zip(all_labels, sel) if s]
-        num_cols = num_rows = len(labels)
+        num_cols = len(labels)
         if num_cols == 0:
             return None, None
 
         for k, corrmat in corrmats.items():
 
             assert corrmat.is_square_matrix()
-
-            from scitbx.array_family import flex
 
             idx = flex.bool(sel).iselection()
             sub_corrmat = flex.double(flex.grid(num_cols, num_cols))
@@ -733,13 +746,15 @@ class Refiner(object):
 
         return (corrmats, labels)
 
+    @property
+    def history(self):
+        """Get the refinement engine's step history"""
+        return self._refinery.history
+
     def print_step_table(self):
         """print useful output about refinement steps in the form of a simple table"""
 
         from libtbx.table_utils import simple_table
-        from math import pi
-
-        rad2deg = 180 / pi
 
         logger.info("\nRefinement steps:")
 
@@ -751,7 +766,7 @@ class Refiner(object):
                 rmsd_multipliers.append(1.0)
             elif units == "rad":  # convert radians to degrees for reporting
                 header.append(name + "\n(deg)")
-                rmsd_multipliers.append(rad2deg)
+                rmsd_multipliers.append(RAD2DEG)
             else:  # leave unknown units alone
                 header.append(name + "\n(" + units + ")")
 
@@ -776,12 +791,9 @@ class Refiner(object):
         """print out-of-sample RSMDs per step, if these were tracked"""
 
         from libtbx.table_utils import simple_table
-        from math import pi
-
-        rad2deg = 180 / pi
 
         # check if it makes sense to proceed
-        if not "out_of_sample_rmsd" in self._refinery.history:
+        if "out_of_sample_rmsd" not in self._refinery.history:
             return
         nref = len(self.get_free_reflections())
         if nref < 10:
@@ -797,7 +809,7 @@ class Refiner(object):
                 rmsd_multipliers.append(1.0)
             elif units == "rad":  # convert radians to degrees for reporting
                 header.append(name + "\n(deg)")
-                rmsd_multipliers.append(rad2deg)
+                rmsd_multipliers.append(RAD2DEG)
             else:  # leave unknown units alone
                 header.append(name + "\n(" + units + ")")
 
@@ -820,9 +832,6 @@ class Refiner(object):
         """print useful output about refinement steps in the form of a simple table"""
 
         from libtbx.table_utils import simple_table
-        from math import pi
-
-        rad2deg = 180 / pi
 
         logger.info("\nRMSDs by experiment:")
 
@@ -857,7 +866,6 @@ class Refiner(object):
 
             scan = exp.scan
             try:
-                temp = scan.get_oscillation(deg=False)
                 images_per_rad = 1.0 / abs(scan.get_oscillation(deg=False)[1])
             except (AttributeError, ZeroDivisionError):
                 images_per_rad = None
@@ -877,22 +885,12 @@ class Refiner(object):
                 elif name == "RMSD_Phi" and units == "rad":
                     rmsds.append(rmsd * images_per_rad)
                 elif units == "rad":
-                    rmsds.append(rmsd * rad2deg)
+                    rmsds.append(rmsd * RAD2DEG)
             rows.append([str(iexp), str(num)] + ["%.5g" % r for r in rmsds])
 
         if len(rows) > 0:
-            truncated = False
-            max_rows = 100
-            if self._verbosity < 3 and len(rows) > max_rows:
-                rows = rows[0:max_rows]
-                truncated = True
             st = simple_table(rows, header)
             logger.info(st.format())
-            if truncated:
-                logger.info(
-                    "Table truncated to show the first %d experiments only", max_rows
-                )
-                logger.info("Re-run with verbosity >= 3 to show all experiments")
 
         return
 
@@ -900,9 +898,6 @@ class Refiner(object):
         """print useful output about refinement steps in the form of a simple table"""
 
         from libtbx.table_utils import simple_table
-        from math import pi
-
-        rad2deg = 180 / pi
 
         if len(self._experiments.scans()) > 1:
             logger.warning(
@@ -911,7 +906,6 @@ class Refiner(object):
             )
         scan = self._experiments.scans()[0]
         try:
-            temp = scan.get_oscillation(deg=False)
             images_per_rad = 1.0 / abs(scan.get_oscillation(deg=False)[1])
         except AttributeError:
             images_per_rad = None
@@ -919,7 +913,7 @@ class Refiner(object):
         for idetector, detector in enumerate(self._experiments.detectors()):
             if len(detector) == 1:
                 continue
-            logger.info("\nDetector {0} RMSDs by panel:".format(idetector + 1))
+            logger.info("\nDetector {} RMSDs by panel:".format(idetector + 1))
 
             header = ["Panel\nid", "Nref"]
             for (name, units) in zip(self._target.rmsd_names, self._target.rmsd_units):
@@ -958,7 +952,7 @@ class Refiner(object):
                     elif name == "RMSD_Phi" and units == "rad":
                         rmsds.append(rmsd * images_per_rad)
                     elif name == "RMSD_DeltaPsi" and units == "rad":
-                        rmsds.append(rmsd * rad2deg)
+                        rmsds.append(rmsd * RAD2DEG)
                 rows.append([str(ipanel), str(num)] + ["%.5g" % r for r in rmsds])
 
             if len(rows) > 0:
@@ -974,27 +968,26 @@ class Refiner(object):
         # Do refinement and return history #
         ####################################
 
-        if self._verbosity > 1:
-            logger.debug("\nExperimental models before refinement:")
-            for i, beam in enumerate(self._experiments.beams()):
-                logger.debug(ordinal_number(i) + " " + str(beam))
-            for i, detector in enumerate(self._experiments.detectors()):
-                logger.debug(ordinal_number(i) + " " + str(detector))
-            for i, goniometer in enumerate(self._experiments.goniometers()):
-                if goniometer is None:
-                    continue
-                logger.debug(ordinal_number(i) + " " + str(goniometer))
-            for i, scan in enumerate(self._experiments.scans()):
-                if scan is None:
-                    continue
-                logger.debug(ordinal_number(i) + " " + str(scan))
-            for i, crystal in enumerate(self._experiments.crystals()):
-                logger.debug(ordinal_number(i) + " " + str(crystal))
+        logger.debug("\nExperimental models before refinement:")
+        for i, beam in enumerate(self._experiments.beams()):
+            logger.debug(ordinal_number(i) + " " + str(beam))
+        for i, detector in enumerate(self._experiments.detectors()):
+            logger.debug(ordinal_number(i) + " " + str(detector))
+        for i, goniometer in enumerate(self._experiments.goniometers()):
+            if goniometer is None:
+                continue
+            logger.debug(ordinal_number(i) + " " + str(goniometer))
+        for i, scan in enumerate(self._experiments.scans()):
+            if scan is None:
+                continue
+            logger.debug(ordinal_number(i) + " " + str(scan))
+        for i, crystal in enumerate(self._experiments.crystals()):
+            logger.debug(ordinal_number(i) + " " + str(crystal))
 
         self._refinery.run()
 
-        # These involve calculation, so skip them when verbosity is zero
-        if self._verbosity > 0:
+        # These involve calculation, so skip them when output is quiet
+        if logger.getEffectiveLevel() < logging.ERROR:
             self.print_step_table()
             self.print_out_of_sample_rmsd_table()
             self.print_exp_rmsd_table()
@@ -1006,25 +999,24 @@ class Refiner(object):
         # Perform post-run tasks to write the refined states back to the models
         self._update_models()
 
-        if self._verbosity > 1:
-            logger.debug("\nExperimental models after refinement:")
-            for i, beam in enumerate(self._experiments.beams()):
-                logger.debug(ordinal_number(i) + " " + str(beam))
-            for i, detector in enumerate(self._experiments.detectors()):
-                logger.debug(ordinal_number(i) + " " + str(detector))
-            for i, goniometer in enumerate(self._experiments.goniometers()):
-                if goniometer is None:
-                    continue
-                logger.debug(ordinal_number(i) + " " + str(goniometer))
-            for i, scan in enumerate(self._experiments.scans()):
-                if scan is None:
-                    continue
-                logger.debug(ordinal_number(i) + " " + str(scan))
-            for i, crystal in enumerate(self._experiments.crystals()):
-                logger.debug(ordinal_number(i) + " " + str(crystal))
+        logger.debug("\nExperimental models after refinement:")
+        for i, beam in enumerate(self._experiments.beams()):
+            logger.debug(ordinal_number(i) + " " + str(beam))
+        for i, detector in enumerate(self._experiments.detectors()):
+            logger.debug(ordinal_number(i) + " " + str(detector))
+        for i, goniometer in enumerate(self._experiments.goniometers()):
+            if goniometer is None:
+                continue
+            logger.debug(ordinal_number(i) + " " + str(goniometer))
+        for i, scan in enumerate(self._experiments.scans()):
+            if scan is None:
+                continue
+            logger.debug(ordinal_number(i) + " " + str(scan))
+        for i, crystal in enumerate(self._experiments.crystals()):
+            logger.debug(ordinal_number(i) + " " + str(crystal))
 
-            # Report on the refined parameters
-            logger.debug(str(self._param_report))
+        # Report on the refined parameters
+        logger.debug(str(self._param_report))
 
         # Return the refinement history
         return self._refinery.history
@@ -1081,7 +1073,7 @@ class ScanVaryingRefiner(Refiner):
     def _update_models(self):
         for iexp, exp in enumerate(self._experiments):
             ar_range = exp.scan.get_array_range()
-            obs_image_numbers = range(ar_range[0], ar_range[1] + 1)
+            obs_image_numbers = list(range(ar_range[0], ar_range[1] + 1))
 
             # write scan-varying s0 vectors back to beam models
             s0_list = self._pred_param.get_varying_s0(obs_image_numbers, iexp)
@@ -1100,28 +1092,29 @@ class ScanVaryingRefiner(Refiner):
             if A_list is not None:
                 exp.crystal.set_A_at_scan_points(A_list)
 
-            # Return early if not calculating scan-varying errors
-            if not self._pred_param.set_scan_varying_errors:
-                return
+            # Calculate scan-varying errors if requested
+            if self._pred_param.set_scan_varying_errors:
 
-            # get state covariance matrices the whole range of images. We select
-            # the first element of this at each image because crystal scan-varying
-            # parameterisations are not multi-state
-            state_cov_list = [
-                self._pred_param.calculate_model_state_uncertainties(
-                    obs_image_number=t, experiment_id=iexp
+                # get state covariance matrices the whole range of images. We select
+                # the first element of this at each image because crystal scan-varying
+                # parameterisations are not multi-state
+                state_cov_list = [
+                    self._pred_param.calculate_model_state_uncertainties(
+                        obs_image_number=t, experiment_id=iexp
+                    )
+                    for t in range(ar_range[0], ar_range[1] + 1)
+                ]
+                if "U_cov" in state_cov_list[0]:
+                    u_cov_list = [e["U_cov"] for e in state_cov_list]
+                else:
+                    u_cov_list = None
+
+                if "B_cov" in state_cov_list[0]:
+                    b_cov_list = [e["B_cov"] for e in state_cov_list]
+                else:
+                    b_cov_list = None
+
+                # return these to the model parameterisations to be set in the models
+                self._pred_param.set_model_state_uncertainties(
+                    u_cov_list, b_cov_list, iexp
                 )
-                for t in range(ar_range[0], ar_range[1] + 1)
-            ]
-            if "U_cov" in state_cov_list[0]:
-                u_cov_list = [e["U_cov"] for e in state_cov_list]
-            else:
-                u_cov_list = None
-
-            if "B_cov" in state_cov_list[0]:
-                b_cov_list = [e["B_cov"] for e in state_cov_list]
-            else:
-                b_cov_list = None
-
-            # return these to the model parameterisations to be set in the models
-            self._pred_param.set_model_state_uncertainties(u_cov_list, b_cov_list, iexp)

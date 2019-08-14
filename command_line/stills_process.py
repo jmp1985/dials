@@ -1,12 +1,18 @@
 #!/usr/bin/env python
-#
-# LIBTBX_SET_DISPATCHER_NAME dials.stills_process
 
 from __future__ import absolute_import, division, print_function
 
+import copy
 import logging
 import os
+import sys
+import tarfile
+import time
+import six.moves.cPickle as pickle
+from six.moves import StringIO
 
+import dials.util
+from dials.array_family import flex
 from dxtbx.model.experiment_list import ExperimentListFactory
 from dxtbx.model.experiment_list import ExperimentList
 from libtbx.utils import Abort, Sorry
@@ -22,9 +28,15 @@ seperately.
 from libtbx.phil import parse
 
 control_phil_str = """
-  verbosity = 1
+  verbosity = 0
     .type = int(value_min=0)
     .help = "The verbosity level"
+
+  input {
+    file_list = None
+      .type = path
+      .help = Path to a list of images
+  }
 
   dispatch {
     pre_import = False
@@ -53,7 +65,18 @@ control_phil_str = """
       .expert_level = 2
       .type = bool
       .help = Integrate indexed images. Ignored if index=False or find_spots=False
-
+    hit_finder{
+      enable = True
+        .type = bool
+        .help = Whether to do hitfinding. hit_finder=False: process all images
+      minimum_number_of_reflections = 16
+        .type = int
+        .help = If the number of strong reflections on an image is less than this, and \
+                 the hitfinder is enabled, discard this image.
+      maximum_number_of_reflections = None
+       .type = int
+       .help = If specified, ignores images with more than this many number of reflections
+    }
   }
 
   output {
@@ -62,29 +85,29 @@ control_phil_str = """
       .help = Directory output files will be placed
     composite_output = False
       .type = bool
-      .help = If True, save one set of json/pickle files per process, where each is a \
+      .help = If True, save one set of experiment/reflection files per process, where each is a \
               concatenated list of all the successful events examined by that process. \
-              If False, output a separate json/pickle file per image (generates a \
+              If False, output a separate experiment/reflection file per image (generates a \
               lot of files).
     logging_dir = None
       .type = str
       .help = Directory output log files will be placed
-    experiments_filename = %s_experiments.json
+    experiments_filename = %s_imported.expt
       .type = str
       .help = The filename for output experiments
-    strong_filename = %s_strong.pickle
+    strong_filename = %s_strong.refl
       .type = str
       .help = The filename for strong reflections from spot finder output.
-    indexed_filename = %s_indexed.pickle
+    indexed_filename = %s_indexed.refl
       .type = str
       .help = The filename for indexed reflections.
-    refined_experiments_filename = %s_refined_experiments.json
+    refined_experiments_filename = %s_refined.expt
       .type = str
       .help = The filename for saving refined experimental models
-    integrated_filename = %s_integrated.pickle
+    integrated_filename = %s_integrated.refl
       .type = str
       .help = The filename for final integrated reflections.
-    integrated_experiments_filename = %s_integrated_experiments.json
+    integrated_experiments_filename = %s_integrated.expt
       .type = str
       .help = The filename for saving final experimental models.
     profile_filename = None
@@ -111,7 +134,7 @@ control_phil_str = """
       .help = For MPI, if using composite mode, specify how many ranks to    \
               aggregate data from.  For example, if you have 100 processes,  \
               composite mode will output N*100 files, where N is the number  \
-              of file types (json, pickle, etc). If you specify stride = 25, \
+              of file types (expt, refl, etc). If you specify stride = 25, \
               then each group of 25 process will send their results to 4     \
               processes and only N*4 files will be created. Ideally, match   \
               stride to the number of processors per node.
@@ -122,7 +145,7 @@ dials_phil_str = """
   input {
     reference_geometry = None
       .type = str
-      .help = Provide an experiments.json file with exactly one detector model. Data processing will use \
+      .help = Provide an models.expt file with exactly one detector model. Data processing will use \
               that geometry instead of the geometry found in the image headers.
   }
 
@@ -134,7 +157,10 @@ dials_phil_str = """
 
   include scope dials.util.options.geometry_phil_scope
   include scope dials.algorithms.spot_finding.factory.phil_scope
-  include scope dials.algorithms.indexing.indexer.index_only_phil_scope
+  include scope dials.algorithms.indexing.indexer.phil_scope
+  indexing {
+      include scope dials.algorithms.indexing.lattice_search.basis_vector_search_phil_scope
+  }
   include scope dials.algorithms.refinement.refiner.phil_scope
   include scope dials.algorithms.integration.integrator.phil_scope
   include scope dials.algorithms.profile_model.factory.phil_scope
@@ -225,12 +251,9 @@ class Script(object):
     def __init__(self):
         """Initialise the script."""
         from dials.util.options import OptionParser
-        import libtbx.load_env
 
         # The script usage
-        usage = (
-            "usage: %s [options] [param.phil] filenames" % libtbx.env.dispatcher_name
-        )
+        usage = "usage: dials.stills_process [options] [param.phil] filenames"
 
         self.tag = None
         self.reference_detector = None
@@ -267,14 +290,17 @@ class Script(object):
     def run(self):
         """Execute the script."""
         from dials.util import log
-        from time import time
         from libtbx import easy_mp
-        import copy
 
         # Parse the command line
         params, options, all_paths = self.parser.parse_args(
             show_diff_phil=False, return_unhandled=True, quick_parse=True
         )
+
+        if not all_paths and params.input.file_list is not None:
+            all_paths.extend(
+                [path.strip() for path in open(params.input.file_list).readlines()]
+            )
 
         # Check we have some filenames
         if not all_paths:
@@ -290,7 +316,7 @@ class Script(object):
         self.options = options
         self.params = params
 
-        st = time()
+        st = time.time()
 
         # Configure logging
         log.config(
@@ -308,7 +334,7 @@ class Script(object):
 
         # Log the diff phil
         diff_phil = self.parser.diff_phil.as_str()
-        if diff_phil is not "":
+        if diff_phil != "":
             logger.info("The following parameters have been modified:\n")
             logger.info(diff_phil)
 
@@ -392,7 +418,7 @@ class Script(object):
                     processor.process_experiments(item[0], item[1])
                 processor.finalize()
 
-            iterable = zip(tags, split_experiments)
+            iterable = list(zip(tags, split_experiments))
 
         else:
             basenames = [
@@ -451,7 +477,7 @@ class Script(object):
                     processor.process_experiments(tag, experiments)
                 processor.finalize()
 
-            iterable = zip(tags, all_paths)
+            iterable = list(zip(tags, all_paths))
 
         # Process the data
         if params.mp.method == "mpi":
@@ -466,8 +492,6 @@ class Script(object):
                 info_path = ""
                 debug_path = ""
             else:
-                import sys
-
                 log_path = os.path.join(
                     params.output.logging_dir, "log_rank%04d.out" % rank
                 )
@@ -491,8 +515,46 @@ class Script(object):
 
             log.config(params.verbosity, info=info_path, debug=debug_path)
 
-            subset = [item for i, item in enumerate(iterable) if (i + rank) % size == 0]
-            do_work(rank, subset)
+            if size <= 2:  # client/server only makes sense for n>2
+                subset = [
+                    item for i, item in enumerate(iterable) if (i + rank) % size == 0
+                ]
+                do_work(rank, subset)
+            else:
+                if rank == 0:
+                    # server process
+                    for item in iterable:
+                        print("Getting next available process")
+                        rankreq = comm.recv(source=MPI.ANY_SOURCE)
+                        print("Process %s is ready, sending %s\n" % (rankreq, item[0]))
+                        comm.send(item, dest=rankreq)
+                    # send a stop command to each process
+                    print("MPI DONE, sending stops\n")
+                    for rankreq in range(size - 1):
+                        rankreq = comm.recv(source=MPI.ANY_SOURCE)
+                        print("Sending stop to %d\n" % rankreq)
+                        comm.send("endrun", dest=rankreq)
+                    print("All stops sent.")
+                else:
+                    # client process
+                    while True:
+                        # inform the server this process is ready for an event
+                        print("Rank %d getting next task" % rank)
+                        comm.send(rank, dest=0)
+                        print("Rank %d waiting for response" % rank)
+                        item = comm.recv(source=0)
+                        if item == "endrun":
+                            print("Rank %d received endrun" % rank)
+                            break
+                        print("Rank %d beginning processing" % rank)
+                        try:
+                            do_work(rank, [item])
+                        except Exception as e:
+                            print(
+                                "Rank %d unhandled exception processing event" % rank,
+                                str(e),
+                            )
+                        print("Rank %d event processed" % rank)
         else:
             from dxtbx.command_line.image_average import splitit
 
@@ -518,7 +580,7 @@ class Script(object):
 
         # Total Time
         logger.info("")
-        logger.info("Total Time Taken = %f seconds" % (time() - st))
+        logger.info("Total Time Taken = %f seconds" % (time.time() - st))
 
 
 class Processor(object):
@@ -543,7 +605,7 @@ class Processor(object):
         if not os.path.exists(debug_dir):
             try:
                 os.makedirs(debug_dir)
-            except OSError as e:
+            except OSError:
                 pass  # due to multiprocessing, makedirs can sometimes fail
         assert os.path.exists(debug_dir)
         self.debug_file_path = os.path.join(debug_dir, "debug_%d.txt" % rank)
@@ -554,7 +616,6 @@ class Processor(object):
         if params.output.composite_output:
             assert composite_tag is not None
             from dxtbx.model.experiment_list import ExperimentList
-            from dials.array_family import flex
 
             # self.all_strong_reflections = flex.reflection_table() # no composite strong pickles yet
             self.all_indexed_experiments = ExperimentList()
@@ -638,7 +699,6 @@ class Processor(object):
         debug_file_handle.close()
 
     def process_experiments(self, tag, experiments):
-        import os
 
         if not self.params.output.composite_output:
             self.setup_filenames(tag)
@@ -649,10 +709,8 @@ class Processor(object):
             not self.params.output.composite_output
             and self.params.output.experiments_filename
         ):
-            from dxtbx.model.experiment_list import ExperimentListDumper
 
-            dump = ExperimentListDumper(experiments)
-            dump.as_json(self.params.output.experiments_filename)
+            experiments.as_json(self.params.output.experiments_filename)
 
         # Do the processing
         try:
@@ -679,6 +737,26 @@ class Processor(object):
             return
         try:
             if self.params.dispatch.index:
+                if (
+                    self.params.dispatch.hit_finder.enable
+                    and len(observed)
+                    < self.params.dispatch.hit_finder.minimum_number_of_reflections
+                ):
+                    print("Not enough spots to index", tag)
+                    self.debug_write("not_enough_spots_%d" % len(observed), "stop")
+                    return
+                if (
+                    self.params.dispatch.hit_finder.maximum_number_of_reflections
+                    is not None
+                ):
+                    if (
+                        self.params.dispatch.hit_finder.enable
+                        and len(observed)
+                        > self.params.dispatch.hit_finder.maximum_number_of_reflections
+                    ):
+                        print("Too many spots to index - Possibly junk", tag)
+                        self.debug_write("too_many_spots_%d" % len(observed), "stop")
+                        return
                 self.debug_write("index_start")
                 experiments, indexed = self.index(experiments, observed)
             else:
@@ -721,10 +799,7 @@ class Processor(object):
         pass
 
     def find_spots(self, experiments):
-        from time import time
-        from dials.array_family import flex
-
-        st = time()
+        st = time.time()
 
         logger.info("*" * 80)
         logger.info("Finding Strong Spots")
@@ -735,10 +810,10 @@ class Processor(object):
 
         # Reset z coordinates for dials.image_viewer; see Issues #226 for details
         xyzobs = observed["xyzobs.px.value"]
-        for i in xrange(len(xyzobs)):
+        for i in range(len(xyzobs)):
             xyzobs[i] = (xyzobs[i][0], xyzobs[i][1], 0)
         bbox = observed["bbox"]
-        for i in xrange(len(bbox)):
+        for i in range(len(bbox)):
             bbox[i] = (bbox[i][0], bbox[i][1], bbox[i][2], bbox[i][3], 0, 1)
 
         if self.params.output.composite_output:
@@ -750,15 +825,13 @@ class Processor(object):
                 self.save_reflections(observed, self.params.output.strong_filename)
 
         logger.info("")
-        logger.info("Time Taken = %f seconds" % (time() - st))
+        logger.info("Time Taken = %f seconds" % (time.time() - st))
         return observed
 
     def index(self, experiments, reflections):
-        from dials.algorithms.indexing.indexer import indexer_base
-        from time import time
-        import copy
+        from dials.algorithms.indexing.indexer import Indexer
 
-        st = time()
+        st = time.time()
 
         logger.info("*" * 80)
         logger.info("Indexing Strong Spots")
@@ -774,7 +847,7 @@ class Processor(object):
             known_crystal_models = None
 
         if params.indexing.stills.method_list is None:
-            idxr = indexer_base.from_parameters(
+            idxr = Indexer.from_parameters(
                 reflections,
                 experiments,
                 known_crystal_models=known_crystal_models,
@@ -786,7 +859,7 @@ class Processor(object):
             for method in params.indexing.stills.method_list:
                 params.indexing.method = method
                 try:
-                    idxr = indexer_base.from_parameters(
+                    idxr = Indexer.from_parameters(
                         reflections, experiments, params=params
                     )
                     idxr.index()
@@ -806,7 +879,6 @@ class Processor(object):
         experiments = idxr.refined_experiments
 
         if known_crystal_models is not None:
-            from dials.array_family import flex
 
             filtered = flex.reflection_table()
             for idx in set(indexed["miller_index"]):
@@ -824,15 +896,14 @@ class Processor(object):
             indexed = filtered
 
         logger.info("")
-        logger.info("Time Taken = %f seconds" % (time() - st))
+        logger.info("Time Taken = %f seconds" % (time.time() - st))
         return experiments, indexed
 
     def refine(self, experiments, centroids):
         if self.params.dispatch.refine:
             from dials.algorithms.refinement import RefinerFactory
-            from time import time
 
-            st = time()
+            st = time.time()
 
             logger.info("*" * 80)
             logger.info("Refining Model")
@@ -850,9 +921,9 @@ class Processor(object):
             centroids = centroids.select(refiner.selection_used_for_refinement())
 
             # Re-estimate mosaic estimates
-            from dials.algorithms.indexing.nave_parameters import nave_parameters
+            from dials.algorithms.indexing.nave_parameters import NaveParameters
 
-            nv = nave_parameters(
+            nv = NaveParameters(
                 params=self.params,
                 experiments=experiments,
                 reflections=centroids,
@@ -872,7 +943,6 @@ class Processor(object):
                     self.params.output.refined_experiments_filename is not None
                     and self.params.output.indexed_filename is not None
                 )
-                from dials.array_family import flex
 
                 n = len(self.all_indexed_experiments)
                 self.all_indexed_experiments.extend(experiments)
@@ -884,24 +954,20 @@ class Processor(object):
         else:
             # Dump experiments to disk
             if self.params.output.refined_experiments_filename:
-                from dxtbx.model.experiment_list import ExperimentListDumper
 
-                dump = ExperimentListDumper(experiments)
-                dump.as_json(self.params.output.refined_experiments_filename)
+                experiments.as_json(self.params.output.refined_experiments_filename)
 
             if self.params.output.indexed_filename:
                 self.save_reflections(centroids, self.params.output.indexed_filename)
 
         if self.params.dispatch.refine:
             logger.info("")
-            logger.info("Time Taken = %f seconds" % (time() - st))
+            logger.info("Time Taken = %f seconds" % (time.time() - st))
 
         return experiments, centroids
 
     def integrate(self, experiments, indexed):
-        from time import time
-
-        st = time()
+        st = time.time()
 
         logger.info("*" * 80)
         logger.info("Integrating Reflections")
@@ -913,7 +979,6 @@ class Processor(object):
         logger.info("Configuring integrator from input parameters")
         from dials.algorithms.profile_model.factory import ProfileModelFactory
         from dials.algorithms.integration.integrator import IntegratorFactory
-        from dials.array_family import flex
 
         # Compute the profile model
         # Predict the reflections
@@ -999,7 +1064,6 @@ class Processor(object):
                     self.params.output.integrated_experiments_filename is not None
                     and self.params.output.integrated_filename is not None
                 )
-                from dials.array_family import flex
 
                 n = len(self.all_integrated_experiments)
                 self.all_integrated_experiments.extend(experiments)
@@ -1011,10 +1075,8 @@ class Processor(object):
         else:
             # Dump experiments to disk
             if self.params.output.integrated_experiments_filename:
-                from dxtbx.model.experiment_list import ExperimentListDumper
 
-                dump = ExperimentListDumper(experiments)
-                dump.as_json(self.params.output.integrated_experiments_filename)
+                experiments.as_json(self.params.output.integrated_experiments_filename)
 
             if self.params.output.integrated_filename:
                 # Save the reflections
@@ -1029,7 +1091,7 @@ class Processor(object):
 
         rmsd_indexed, _ = calc_2D_rmsd_and_displacements(indexed)
         log_str = "RMSD indexed (px): %f\n" % (rmsd_indexed)
-        for i in xrange(6):
+        for i in range(6):
             bright_integrated = integrated.select(
                 (
                     integrated["intensity.sum.value"]
@@ -1059,7 +1121,7 @@ class Processor(object):
         logger.info(log_str)
 
         logger.info("")
-        logger.info("Time Taken = %f seconds" % (time() - st))
+        logger.info("Time Taken = %f seconds" % (time.time() - st))
         return integrated
 
     def write_integration_pickles(self, integrated, experiments, callback=None):
@@ -1073,21 +1135,15 @@ class Processor(object):
         def functionname(params, outfile, frame), where params is the phil scope, outfile is the path
         to the pickle that will be saved, and frame is the python dictionary to be serialized.
         """
-        try:
-            picklefilename = self.params.output.integration_pickle
-        except AttributeError:
+        if not hasattr(self.params.output, "integration_pickle"):
             return
 
         if self.params.output.integration_pickle is not None:
-
             from libtbx import easy_pickle
-            import os
             from xfel.command_line.frame_extractor import ConstructFrame
-            from dials.array_family import flex
 
             # Split everything into separate experiments for pickling
-            for e_number in xrange(len(experiments)):
-                experiment = experiments[e_number]
+            for e_number, experiment in enumerate(experiments):
                 e_selection = integrated["id"] == e_number
                 reflections = integrated.select(e_selection)
 
@@ -1136,12 +1192,9 @@ class Processor(object):
 
     def process_reference(self, reference):
         """ Load the reference spots. """
-        from dials.array_family import flex
-        from time import time
-
         if reference is None:
             return None, None
-        st = time()
+        st = time.time()
         assert "miller_index" in reference
         assert "id" in reference
         logger.info("Processing reference reflections")
@@ -1175,17 +1228,15 @@ class Processor(object):
             )
         logger.info(" using %d indexed reflections" % len(reference))
         logger.info(" found %d junk reflections" % len(rubbish))
-        logger.info(" time taken: %g" % (time() - st))
+        logger.info(" time taken: %g" % (time.time() - st))
         return reference, rubbish
 
     def save_reflections(self, reflections, filename):
         """ Save the reflections to file. """
-        from time import time
-
-        st = time()
+        st = time.time()
         logger.info("Saving %d reflections to %s" % (len(reflections), filename))
         reflections.as_pickle(filename)
-        logger.info(" time taken: %g" % (time() - st))
+        logger.info(" time taken: %g" % (time.time() - st))
 
     def finalize(self):
         """ Perform any final operations """
@@ -1201,8 +1252,8 @@ class Processor(object):
                 size = comm.Get_size()  # size: number of processes running in this job
 
                 if rank % stride == 0:
-                    subranks = [rank + i for i in xrange(1, stride) if rank + i < size]
-                    for i in xrange(len(subranks)):
+                    subranks = [rank + i for i in range(1, stride) if rank + i < size]
+                    for i in range(len(subranks)):
                         logger.info("Rank %d waiting for sender" % rank)
                         sender, indexed_experiments, indexed_reflections, integrated_experiments, integrated_reflections, int_pickles, int_pickle_filenames = comm.recv(
                             source=MPI.ANY_SOURCE
@@ -1264,10 +1315,10 @@ class Processor(object):
                 len(self.all_indexed_experiments) > 0
                 and self.params.output.refined_experiments_filename
             ):
-                from dxtbx.model.experiment_list import ExperimentListDumper
 
-                dump = ExperimentListDumper(self.all_indexed_experiments)
-                dump.as_json(self.params.output.refined_experiments_filename)
+                self.all_indexed_experiments.as_json(
+                    self.params.output.refined_experiments_filename
+                )
 
             if (
                 len(self.all_indexed_reflections) > 0
@@ -1281,10 +1332,10 @@ class Processor(object):
                 len(self.all_integrated_experiments) > 0
                 and self.params.output.integrated_experiments_filename
             ):
-                from dxtbx.model.experiment_list import ExperimentListDumper
 
-                dump = ExperimentListDumper(self.all_integrated_experiments)
-                dump.as_json(self.params.output.integrated_experiments_filename)
+                self.all_integrated_experiments.as_json(
+                    self.params.output.integrated_experiments_filename
+                )
 
             if (
                 len(self.all_integrated_reflections) > 0
@@ -1297,8 +1348,6 @@ class Processor(object):
 
             # Create a tar archive of the integration dictionary pickles
             if len(self.all_int_pickles) > 0 and self.params.output.integration_pickle:
-                import tarfile, StringIO, time, cPickle as pickle
-
                 tar_template_integration_pickle = self.params.output.integration_pickle.replace(
                     "%d", "%s"
                 )
@@ -1313,7 +1362,7 @@ class Processor(object):
                 for i, (fname, d) in enumerate(
                     zip(self.all_int_pickle_filenames, self.all_int_pickles)
                 ):
-                    string = StringIO.StringIO(pickle.dumps(d, protocol=2))
+                    string = StringIO(pickle.dumps(d, protocol=2))
                     info = tarfile.TarInfo(name=fname)
                     info.size = len(string.buf)
                     info.mtime = time.time()
@@ -1322,10 +1371,6 @@ class Processor(object):
 
 
 if __name__ == "__main__":
-    from dials.util import halraiser
-
-    try:
+    with dials.util.show_mail_on_error():
         script = Script()
         script.run()
-    except Exception as e:
-        halraiser(e)
