@@ -179,3 +179,72 @@ def test_ewald_spread_approximation():
 
     assert tuple(expected_covariance) == pytest.approx(tuple(approximated_covariance))
     assert tuple(approximated_covariance) == pytest.approx(tuple(P), rel=0.1)
+
+    expected_product_dist /= flex.sum(expected_product_dist)
+    approximated_product_dist /= flex.sum(approximated_product_dist)
+
+    # Compute the distribution of diffracted beam vectors
+    identity = matrix.sqr((1, 0, 0, 0, 1, 0, 0, 0, 1))
+    rc = p
+    J = (
+        identity
+        - 0.5
+        * s0
+        * ((2 * (rc.dot(s0)) * rc - (rc.dot(rc)) * s0) / (rc.dot(s0)) ** 2).transpose()
+    )
+    sc = -0.5 * (rc.dot(rc) / s0.dot(rc)) * s0 + rc
+    q = sc
+    Q = J * P * J.transpose()
+    Q11 = matrix.sqr((Q[0], Q[1], Q[3], Q[4]))
+    # q1 = matrix.col((q[0], q[1]))
+
+    # diffracted_dist = flex.double(flex.grid(grid_size//2, grid_size//2))
+    # diffracted_dist2 = flex.double(flex.grid(grid_size//4, grid_size//4, grid_size//4))
+
+    covariance_diffracted_dist = matrix.sqr((0, 0, 0, 0))
+    for k in range(grid_size):
+        for j in range(grid_size):
+            for i in range(grid_size):
+                w1 = expected_product_dist[k, j, i]
+                s = matrix.col(
+                    (
+                        box[0] + step_size * i,
+                        box[2] + step_size * j,
+                        box[4] + step_size * k,
+                    )
+                )
+                r = s - s0
+                l = (-2 / s0.length()) * (s0.dot(r)) / (r.dot(r))
+                s00 = s0.normalize() / l
+                s11 = s00 + r
+
+                # kk = int((s11[2] - (box[4]-d)) / (8*step_size))
+                # jj = int((s11[1] - (box[2]-d)) / (8*step_size))
+                # ii = int((s11[0] - (box[0]-d)) / (8*step_size))
+
+                # if all(item >= 0 and item < grid_size//4 for item in [kk, jj, ii]):
+                #     diffracted_dist2[kk,jj,ii] += w1
+
+                assert s11.length() == pytest.approx(s00.length())
+                x = R * s  # 11
+                z = matrix.col((0, 0, 1.0))
+                t = 1.0 / x.dot(z)
+                xx = t * x
+                q = matrix.col((xx[0], xx[1]))
+                covariance_diffracted_dist += w1 * q * q.transpose()
+                # ii = int((xx[0]+0.001)/(2*step_size))
+                # jj = int((xx[1]+0.001)/(2*step_size))
+                # if ii >= 0 and jj >= 0 and ii < grid_size//2 and jj < grid_size//2:
+                #     diffracted_dist[jj,ii] += w1
+    covariance_diffracted_dist /= flex.sum(expected_product_dist)
+
+    assert tuple(covariance_diffracted_dist) == pytest.approx(tuple(Q11), rel=0.1)
+
+    # print("")
+    # print(covariance_diffracted_dist)
+    # print(Q11)
+
+    # print(var)
+    # from matplotlib import pylab
+    # pylab.imshow(diffracted_dist2.as_numpy_array()[:,:,12])
+    # pylab.show()
