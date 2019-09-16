@@ -1,10 +1,9 @@
 from __future__ import division
 from __future__ import print_function
-from libtbx.phil import parse
-from math import sqrt, exp, pi, acos
+from math import sqrt
 from random import sample, seed
 from scitbx import matrix
-from dials.algorithms.profile_model.potato.crystal_refiner import CrystalRefiner
+from dials.algorithms.profile_model.potato.refiner import Refiner
 from dials.algorithms.profile_model.potato.model import (
     compute_change_of_basis_operation,
 )
@@ -21,9 +20,9 @@ def compute_mean_plane(mu, sigma, s0):
 
     assert abs(1 - mu_1.normalize().dot(z)) < 1e-7
 
-    sigma_11 = matrix.sqr((sigma_1[0], sigma_1[1], sigma_1[3], sigma_1[4]))
+    # sigma_11 = matrix.sqr((sigma_1[0], sigma_1[1], sigma_1[3], sigma_1[4]))
     sigma_12 = matrix.col((sigma_1[2], sigma_1[5]))
-    sigma_21 = matrix.col((sigma_1[3], sigma_1[7])).transpose()
+    # sigma_21 = matrix.col((sigma_1[3], sigma_1[7])).transpose()
     sigma_22 = sigma_1[8]
     mu1 = matrix.col((mu_1[0], mu_1[1]))
     mu2 = mu_1[2]
@@ -58,7 +57,6 @@ def generate_observations(experiments, reflections, sigma):
 def test_simplex():
 
     from dials.array_family import flex
-    import sys
 
     seed(0)
 
@@ -136,7 +134,7 @@ def test_simplex():
     model = Simple6MosaicityModel(sigma)
 
     # Do the refinement
-    refiner = CrystalRefiner(experiments[0], reflections, model)
+    refiner = Refiner(experiments[0], reflections, model)
 
     crystal = refiner.experiment.crystal
 
